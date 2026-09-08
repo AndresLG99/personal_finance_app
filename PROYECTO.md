@@ -4,7 +4,7 @@
 
 Mis finanzas es una primera versión interactiva de una aplicación personal para registrar operaciones y consultar saldos diarios. Reúne en tres vistas un flujo que antes ocupaba diez pestañas de Excel. Prioriza listas, tarjetas de indicadores y un calendario, con una interfaz oscura inspirada en iOS y consistente con el portfolio de Andrés.
 
-**Estado:** integración con Supabase conectada. El propietario confirmó inicio de sesión, guardado tras recarga y lectura desde dos navegadores. La publicación está en proceso; las pruebas de aislamiento y concurrencia siguen pendientes. Las capturas contienen datos ficticios; no se ha importado el Excel.
+**Estado:** integración con Supabase conectada. El propietario confirmó inicio de sesión, guardado tras recarga y lectura desde dos navegadores. Publicada en GitHub Pages; las pruebas de aislamiento y concurrencia siguen pendientes. Las capturas contienen datos ficticios; no se ha importado el Excel.
 
 ![Vista de movimientos con datos de ejemplo](movimientos.png)
 
@@ -132,12 +132,12 @@ El cliente está preparado para suscribirse a cambios de su propio registro medi
 
 ## Trabajo pendiente
 
-- Conectar Supabase, ejecutar el esquema y probar acceso autorizado/no autorizado y concurrencia real.
-- Publicar y verificar GitHub Pages.
+- Probar aislamiento entre usuarios y concurrencia simultánea.
+- Registro manual de gastos programados e ingresos aproximados, a cargo del propietario.
 - Importar el historial después de validar cuentas, saldos y pagos para evitar duplicados.
 - Desglosar nóminas por concepto; hoy se capturan percepciones y deducciones totales.
 - Conciliar cuotas MSI con pagos globales ya programados y permitir reestructurar planes.
-- Ampliar recurrencias y agregar restauración del respaldo exportado.
+- Agregar restauración del respaldo exportado.
 
 ## Aprendizajes del proyecto
 
@@ -152,3 +152,7 @@ El reto central fue trasladar la lógica de una hoja de cálculo a operaciones e
 - [Supabase Realtime](https://supabase.com/docs/guides/realtime/postgres-changes)
 
 La app es un proyecto personal desarrollado con asistencia de IA. No ejecuta operaciones bancarias ni ofrece asesoría financiera.
+
+## Actualización: organización y recurrencias
+
+Los movimientos se ordenan por fecha ascendente. Cada registro admite categoría y negocio opcionales, además de concepto; estos campos también participan en la búsqueda. Las reglas permiten repetir cada X días, semanas, meses o años y definir el número total de pagos. Se conserva el día original en recurrencias mensuales cuando un mes corto obliga a ajustar la fecha. Los movimientos ya existentes no se modifican.
