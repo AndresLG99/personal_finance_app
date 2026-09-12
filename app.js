@@ -1,4 +1,4 @@
-import {openPayroll} from './payroll.js?v=20260912-2';
+import {openPayroll} from './payroll.js?v=20260912-3';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
 
 import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit} from './finance.js?v=20260912-1';
