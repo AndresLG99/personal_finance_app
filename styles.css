@@ -3,3 +3,5 @@
 @media(min-width:801px){main{width:calc(100% - 48px)}header{width:calc(100% - 32px)}}
 
 @media(max-width:800px){.filters input[type=search]{flex-basis:100%;width:100%}.filters select{flex:1}}
+
+.negative{color:#ff6961}.positive{color:#66dbaa}.neutral{color:#a1a1aa}.pay-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:20px 0}.pay-tabs .active{background:#393033;border-color:#ff6961}#pay-editor{padding:16px;border:1px solid #333;border-radius:16px}#pay-editor label{display:block;margin:10px 0}#pay-lines .row{flex-wrap:wrap}#pay-totals{margin:18px 0;padding:12px;border-top:1px solid #444}#line-error{color:#ff6961}
