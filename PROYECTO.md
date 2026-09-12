@@ -201,3 +201,27 @@ En Costos recurrentes, Editar actualiza el calendario pendiente y conserva los m
 ### Prueba familiar
 
 Cada familiar necesita su propio usuario de Supabase Authentication. El documento financiero usa `auth.uid()` para leer y guardar exclusivamente el registro del usuario autenticado. La interfaz actual incluye inicio de sesión; los usuarios se pueden crear desde Authentication → Users en el proyecto Supabase. No hay registro público en la app. Las pruebas completas de aislamiento entre dos cuentas reales siguen pendientes.
+
+
+## Catálogo fijo e importación de programaciones
+
+El catálogo se ordena alfabéticamente en español, con Sin Categoria, Otros Ingresos y Otros al final. Al cargar la cuenta se unifican las categorías de movimientos y reglas existentes: Subscriptions → Suscripciones, Phone → Telefono, Medicos → Médicos y Comida → Alimentación. Hormiga permanece en la lista fija. Esta migración conserva fechas, importes e identificadores y se guarda en Supabase con control de revisión.
+
+Configuración ofrece Descargar plantilla CSV y Cargar CSV. La importación muestra una vista previa y se confirma antes de guardar. Omite fechas anteriores a la fecha local actual; incluye hoy y fechas futuras sin límite de año. El filtro mensual de Movimientos continúa aplicándose a la visualización.
+
+```csv
+id,fecha,tipo,concepto,cuenta_origen,cuenta_destino,monto,categoria,negocio,notas,monto_recibido
+pago-001,2031-01-22,pago,Pago tarjeta,Mi banco,Mi tarjeta,1500.00,Pago de tarjeta,,,
+```
+
+- Obligatorios: fecha, tipo, concepto y monto; las cuentas dependen del tipo.
+- Tipos: pago, gasto, ingreso, transferencia. Todos se importan pendientes, incluso si hay columnas adicionales de estado.
+- Fechas: AAAA-MM-DD o DD/MM/AAAA. Importes positivos con hasta dos decimales. Se aceptan coma o punto y coma como delimitador y celdas entre comillas.
+- Pago o transferencia requiere origen y destino; gasto solo origen; ingreso solo destino. Las cuentas deben existir, estar activas y coincidir por nombre o identificador.
+- El ID externo es opcional. Los IDs repetidos con datos diferentes se rechazan. Las coincidencias de fecha, tipo, cuentas, monto y concepto se omiten para evitar duplicados, incluso frente a movimientos confirmados.
+- Si una fila vigente tiene errores, no se importa el archivo parcialmente. Se muestran los primeros 30 errores. La vista previa muestra hasta 100 movimientos; al confirmar se procesan todas las filas válidas.
+- No hay límite de año; el archivo individual debe pesar menos de 4.5 MB y el registro financiero debe respetar el límite del documento en Supabase.
+
+![Vista previa CSV con datos de ejemplo](importacion-csv.png)
+
+Pruebas: migración repetible, orden fijo, exclusión del pasado, inclusión de hoy y 2040, fechas imposibles, montos, delimitadores, comillas, cuentas, categorías e importaciones duplicadas. También se verificó la aparición de un pago de 2040 en Movimientos en un entorno de ejemplo.

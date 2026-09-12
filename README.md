@@ -9,6 +9,7 @@ Aplicación personal con GitHub Pages y Supabase. Interfaz adaptable a computado
 - Cuentas, tarjetas, deudas y compras a meses sin intereses.
 - Costos recurrentes editables por días, semanas, meses o años, con eliminación de reglas y movimientos.
 - Nómina por concepto: líquido bancario oficial, desglose posterior y comparación de netos.
+- Categorías fijas unificadas e importación CSV de pagos programados desde hoy, sin límite de año, con vista previa y detección de duplicados.
 - Exportación de respaldo JSON.
 
 ## Acceso

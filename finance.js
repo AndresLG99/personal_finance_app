@@ -12,7 +12,10 @@ export function recurringDate(first,index,every=1,unit='months'){
  const d=new Date(first+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+index*every*(unit==='weeks'?7:1));return d.toISOString().slice(0,10);
 }
 
-export const CATEGORIES=['Sin categoría','Alimentación','Supermercado','Vivienda','Servicios','Transporte','Gasolina','Salud','Educación','Entretenimiento','Suscripciones','Compras','Viajes','Deporte','Mascotas','Regalos','Impuestos','Nómina','Otros ingresos','Ahorro','Transferencias','Pago de tarjeta','Pago de préstamo','Otros'];
+export const CATEGORIES=['Alimentación','Supermercado','Vivienda','Servicios','Transporte','Gasolina','Salud','Educación','Entretenimiento','Suscripciones','Compras','Viajes','Deporte','Mascotas','Regalos','Impuestos','Nómina','Ahorro','Transferencias','Pago de tarjeta','Pago de préstamo','Telefono','Médicos','Hormiga'].sort((a,b)=>a.localeCompare(b,'es')).concat(['Sin Categoria','Otros Ingresos','Otros']);
+export const categoryKey=value=>String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+export function canonicalCategory(value){const key=categoryKey(value);const aliases={subscriptions:'Suscripciones',phone:'Telefono',medicos:'Médicos',comida:'Alimentación'};return aliases[key]||CATEGORIES.find(c=>categoryKey(c)===key)||(key?String(value).trim():'Sin Categoria');}
+export function migrateCategories(state){const next=structuredClone(state);for(const list of [next.transactions,next.rules])for(const item of list||[])item.category=canonicalCategory(item.category);return next;}
 export function removeTransaction(state,id,cancelInstallments=false){
  const next=structuredClone(state),t=next.transactions.find(t=>t.id===id);if(!t)throw Error('El movimiento ya no existe.');
  const rule=next.rules.find(r=>r.id===t.parent);
