@@ -135,7 +135,7 @@ El cliente está preparado para suscribirse a cambios de su propio registro medi
 - Probar aislamiento entre usuarios y concurrencia simultánea.
 - Registro manual de gastos programados e ingresos aproximados, a cargo del propietario.
 - Importar el historial después de validar cuentas, saldos y pagos para evitar duplicados.
-- Desglosar nóminas por concepto; hoy se capturan percepciones y deducciones totales.
+- Ampliar las pruebas de aislamiento entre usuarios y los flujos de recuperación de acceso.
 - Conciliar cuotas MSI con pagos globales ya programados y permitir reestructurar planes.
 - Agregar restauración del respaldo exportado.
 
@@ -163,7 +163,7 @@ Movimientos separa realizados (fecha descendente) y pendientes (fecha ascendente
 
 Las categorías se seleccionan de un catálogo inicial y de las categorías históricas ya existentes para conservar compatibilidad. No se crean desde un campo libre. Los negocios ofrecen sugerencias del historial y permiten nombres nuevos.
 
-Calendario y Saldos coloca Movimientos del día junto al calendario y Saldos debajo, con fecha larga. Los movimientos son de consulta y muestran el saldo proyectado después de cada operación. Para empates de fecha se usa el orden existente de los registros, ya que no se captura hora. El nuevo formulario de nóminas está pendiente de definición con el propietario.
+Calendario y Saldos coloca Movimientos del día junto al calendario y Saldos debajo, con fecha larga. Los movimientos son de consulta y muestran el saldo proyectado después de cada operación. Para empates de fecha se usa el orden existente de los registros, ya que no se captura hora. El formulario de nóminas permite guardar el líquido bancario y completar el desglose después.
 
 ## Nómina detallada y lectura de importes
 
@@ -172,9 +172,32 @@ La nómina se registra en tres pestañas: Percepciones, Deducciones e Informativ
 ```js
 const neto = percepciones - deducciones;
 // Los informativos no se suman al neto.
-// Los vales generan un ingreso independiente en la cuenta seleccionada.
+// Los vales son informativos y no crean movimientos automáticos.
 ```
 
 Las sugerencias personales se importan al espacio privado del usuario en Supabase, sin publicar salarios ni conceptos privados en GitHub. Los importes fijos se proponen como valores editables; los variables requieren capturar el monto real. El detalle queda disponible en Configuración. Cada depósito puede confirmarse desde Movimientos.
 
 Los saldos positivos e ingresos se muestran en verde; saldos negativos, gastos y pagos en rojo; transferencias entre cuentas en gris. Los signos complementan el color. Las verificaciones cubren los límites de quincena, cálculo en centavos y exclusión de informativos del neto.
+
+### Depósito primero, desglose después
+
+El usuario puede registrar únicamente empresa, fecha, cuenta y neto bancario. Más adelante abre «Completar o editar desglose» en Configuración. El depósito conserva su identificador: completar conceptos no duplica ingresos. Los vales forman parte del registro informativo; no generan depósitos automáticos.
+
+```js
+const diferencia = netoBancario - (percepciones - deducciones);
+```
+
+Sin conceptos se muestra «Desglose pendiente». Con conceptos se informa coincidencia o diferencia positiva/negativa, calculada en centavos. Una diferencia no impide guardar un desglose parcial. Se verificaron depósito sin conceptos, edición posterior, identificadores estables y exclusión de vales del neto.
+
+
+![Comparación de nómina con datos de ejemplo](nomina-comparacion.png)
+
+### Edición y eliminación
+
+Movimientos permite eliminar registros tras revisar el concepto, la fecha y el monto en una confirmación. Los saldos se recalculan. Al borrar el depósito de una nómina se elimina también su desglose asociado; otros depósitos históricos se conservan.
+
+En Costos recurrentes, Editar actualiza el calendario pendiente y conserva los movimientos realizados y las excepciones individuales. Las fechas eliminadas no se regeneran. Eliminar permite elegir entre cancelar los pendientes o conservarlos como movimientos independientes.
+
+### Prueba familiar
+
+Cada familiar necesita su propio usuario de Supabase Authentication. El documento financiero usa `auth.uid()` para leer y guardar exclusivamente el registro del usuario autenticado. La interfaz actual incluye inicio de sesión; los usuarios se pueden crear desde Authentication → Users en el proyecto Supabase. No hay registro público en la app. Las pruebas completas de aislamiento entre dos cuentas reales siguen pendientes.

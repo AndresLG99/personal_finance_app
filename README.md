@@ -7,7 +7,8 @@ Aplicación personal con GitHub Pages y Supabase. Interfaz adaptable a computado
 - Transferencias entre cuentas y entre MXN/CAD.
 - Calendario de saldos reales y proyectados.
 - Cuentas, tarjetas, deudas y compras a meses sin intereses.
-- Costos recurrentes mensuales y nómina con percepciones y deducciones totales.
+- Costos recurrentes editables por días, semanas, meses o años, con eliminación de reglas y movimientos.
+- Nómina por concepto: líquido bancario oficial, desglose posterior y comparación de netos.
 - Exportación de respaldo JSON.
 
 ## Acceso
@@ -24,6 +25,6 @@ GitHub Pages está configurado para publicar desde la rama main y la carpeta ra�
 El propietario confirmó inicio de sesión, guardado tras recarga y lectura desde dos navegadores. Las pruebas locales cubren cuotas, centavos, fin de mes, año bisiesto y conservación del saldo en transferencias. Las pruebas de aislamiento con dos usuarios y concurrencia simultánea siguen pendientes.
 
 ## Alcance pendiente
-Importación validada del Excel, nómina por concepto, conciliación de cuotas MSI con pagos globales, reestructuración de planes y restauración de respaldos. La tabla usa un documento JSONB por usuario con control de revisión; para mayor volumen se recomienda normalizar el modelo.
+Importación validada del Excel, conciliación de cuotas MSI con pagos globales, reestructuración de planes y restauración de respaldos. La tabla usa un documento JSONB por usuario con control de revisión; para mayor volumen se recomienda normalizar el modelo.
 
 Las capturas de documentación contienen datos de ejemplo. No se ejecutan pagos bancarios.

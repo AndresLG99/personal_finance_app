@@ -13,6 +13,37 @@ export function recurringDate(first,index,every=1,unit='months'){
 }
 
 export const CATEGORIES=['Sin categoría','Alimentación','Supermercado','Vivienda','Servicios','Transporte','Gasolina','Salud','Educación','Entretenimiento','Suscripciones','Compras','Viajes','Deporte','Mascotas','Regalos','Impuestos','Nómina','Otros ingresos','Ahorro','Transferencias','Pago de tarjeta','Pago de préstamo','Otros'];
+export function removeTransaction(state,id,cancelInstallments=false){
+ const next=structuredClone(state),t=next.transactions.find(t=>t.id===id);if(!t)throw Error('El movimiento ya no existe.');
+ const rule=next.rules.find(r=>r.id===t.parent);
+ if(rule){rule.excludedDates=[...new Set([...(rule.excludedDates||[]),t.scheduledDate||t.date])];}
+ next.transactions=next.transactions.filter(x=>x.id!==id&&!(cancelInstallments&&t.kind==='msi'&&x.parent===id&&x.status==='pending'));
+ if(t.payrollId&&(t.payrollPart==='bank'||(!t.payrollPart&&!t.concept.startsWith('Vales de despensa')))){
+  next.payrolls=(next.payrolls||[]).filter(p=>p.id!==t.payrollId);
+  next.transactions=next.transactions.map(x=>{if(x.payrollId!==t.payrollId)return x;const copy={...x};delete copy.payrollId;delete copy.payrollPart;return copy;});
+ }
+ return next;
+}
+export function removeRule(state,id,removePending=true){
+ const next=structuredClone(state);next.rules=next.rules.filter(r=>r.id!==id);
+ next.transactions=next.transactions.filter(t=>!(removePending&&t.parent===id&&t.status==='pending')).map(t=>{if(t.parent!==id)return t;const copy={...t};delete copy.parent;return copy;});return next;
+}
+export function saveRule(state,rule,uid){
+ if(!Number.isSafeInteger(rule.amount)||rule.amount<=0||!Number.isInteger(rule.count)||rule.count<1||rule.count>60||!Number.isInteger(rule.every)||rule.every<1||rule.every>365)throw Error('Revisa monto, frecuencia y número de pagos.');
+ const next=structuredClone(state),old=next.rules.find(r=>r.id===rule.id);
+ const linked=next.transactions.filter(t=>t.parent===rule.id);
+ const protectedDates=new Set([...linked.filter(t=>t.status==='done'||t.individualOverride).map(t=>t.scheduledDate||t.date),...(old?.excludedDates||[])]);
+ const protectedSlots=new Set(old?.protectedSlots||[]);if(old)for(let i=0;i<old.count;i++){if(protectedDates.has(recurringDate(old.first,i,old.every||1,old.unit||'months')))protectedSlots.add(i);}
+ const r={...rule,excludedDates:old?.excludedDates||[],protectedSlots:[...protectedSlots]};
+ if(old)next.rules[next.rules.indexOf(old)]=r;else next.rules.push(r);
+ next.transactions=next.transactions.filter(t=>t.parent!==r.id||t.status!=='pending'||t.individualOverride);
+ for(let i=0;i<r.count;i++){
+  const date=recurringDate(r.first,i,r.every,r.unit);if(protectedDates.has(date)||protectedSlots.has(i))continue;
+  const previous=linked.find(t=>t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)===date);
+  next.transactions.push({id:previous?.id||uid(),parent:r.id,kind:'expense',concept:r.concept,category:r.category||'',business:r.business||'',from:r.from,amount:r.amount,date,status:'pending'});
+ }
+ return next;
+}
 export function monthlyLists(transactions,month){
  const rows=transactions.filter(t=>t.date.startsWith(month));
  return {done:rows.filter(t=>t.status==='done').sort((a,b)=>b.date.localeCompare(a.date)),pending:rows.filter(t=>t.status==='pending').sort((a,b)=>a.date.localeCompare(b.date))};
