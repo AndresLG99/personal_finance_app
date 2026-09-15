@@ -251,3 +251,6 @@ Los campos monetarios usan teclado decimal y separadores de miles durante la cap
 ![Calculadora de importes en móvil, datos de ejemplo](calculadora-movil.png)
 
 El botón flotante «+» permite abrir Nuevo movimiento desde cualquier sección. Tiene nombre accesible y se ubica por encima de la navegación móvil. Se verificaron cálculos financieros, duplicación independiente, cuentas por cobrar, deudas reabiertas, vencidos, captura formateada, guardado de una copia y distribución a 390 px de ancho. El teclado nativo depende del dispositivo; la vista móvil se comprobó mediante una ventana de prueba, sin un teléfono físico.
+
+
+Los movimientos programados del historial por cuenta en Insights incluyen Modificar. Abre el mismo formulario de edición de Movimientos y, al guardar, actualiza los saldos y la proyección en la cuenta seleccionada. Los realizados siguen como consulta en Insights.

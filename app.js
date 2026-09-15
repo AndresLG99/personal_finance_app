@@ -1,4 +1,4 @@
-import {insightsView,duplicateDraft} from './insights.js?v=20260915-1';
+import {insightsView,duplicateDraft} from './insights.js?v=20260915-2';
 import {enhanceMoneyInputs} from './money-input.js?v=20260915-1';
 import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260912-5';
