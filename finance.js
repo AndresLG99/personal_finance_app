@@ -65,7 +65,7 @@ export function saveTransactionEdit(state,item,scope='one'){
  const old=state.transactions.find(t=>t.id===item.id);
  if(!old){state.transactions.push(item);return;}
  const anchor=old.scheduledDate||old.date;
- const fields=['concept','category','business','notes','amount','received','from','to'];
+ const fields=['concept','category','business','notes','amount','received','from','to','fx'];
  if(scope==='future'&&old.status==='pending'&&item.status==='pending'&&old.parent){
  for(const t of state.transactions){if(t.id!==old.id&&t.parent===old.parent&&t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)>=anchor){for(const key of fields)t[key]=item[key];}}
  const rule=state.rules.find(r=>r.id===old.parent);if(rule)for(const key of ['concept','category','business','notes','amount','from'])rule[key]=item[key];

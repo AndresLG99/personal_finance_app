@@ -254,3 +254,21 @@ El botón flotante «+» permite abrir Nuevo movimiento desde cualquier sección
 
 
 Los movimientos programados del historial por cuenta en Insights incluyen Modificar. Abre el mismo formulario de edición de Movimientos y, al guardar, actualiza los saldos y la proyección en la cuenta seleccionada. Los realizados siguen como consulta en Insights.
+
+
+### Acciones compactas y conversión entre monedas
+Los historiales de Insights ofrecen modificar pendientes, duplicar y eliminar mediante iconos accesibles. En celular las acciones se encuentran sobre el concepto y fuera de la fila de estado. Movimientos utiliza los mismos iconos; eliminar conserva su diálogo de confirmación.
+
+Para pagos y transferencias entre monedas, se puede capturar el importe de origen o destino. La app consulta Frankfurter v2 (https://frankfurter.dev/), sin claves ni envío de importes o datos de cuentas. Solo envía monedas y fecha. Las referencias no son cotizaciones bancarias: se muestra su fecha efectiva y puede corresponder al último día disponible.
+
+Los pendientes se recalculan al abrir y cada hora mientras la app está abierta. La conversión conserva el lado capturado y redondea el otro a centavos. No requiere un proceso de servidor ni republicar Pages. Al guardar un realizado se conserva la tasa de su fecha o la tasa/importes manuales. Los realizados existentes conservan sus valores. Si la consulta falla, se conservan las estimaciones anteriores y se informa; un nuevo realizado puede guardarse con tasa manual.
+
+```js
+// Importes en centavos; FX permanece dentro del registro del usuario.
+transaction.fx = { mode: 'auto', anchor: 'from', rate: 13.2,
+  rateDate: '2026-09-15', fixed: true };
+// Solo los pendientes se actualizan automáticamente.
+if (transaction.status === 'pending') refreshPending(book);
+```
+
+![Acciones de Insights en celular, con datos de ejemplo](insights-acciones-movil.png)
