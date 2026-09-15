@@ -3,7 +3,9 @@
 Aplicación personal con GitHub Pages y Supabase. Interfaz adaptable a computadora y celular, con el estilo del portfolio de Andrés.
 
 ## Funciones
-- Movimientos realizados y programados.
+- Movimientos realizados y programados, con duplicación a la fecha actual.
+- Insights: gastos por categoría, historial completo por cuenta y fechas de liquidación proyectadas.
+- Captura monetaria con teclado decimal, calculadora y botón flotante para registrar movimientos.
 - Transferencias entre cuentas y entre MXN/CAD.
 - Calendario de saldos reales y proyectados.
 - Cuentas, tarjetas, deudas y compras a meses sin intereses.

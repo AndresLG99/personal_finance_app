@@ -225,3 +225,29 @@ pago-001,2031-01-22,pago,Pago tarjeta,Mi banco,Mi tarjeta,1500.00,Pago de tarjet
 ![Vista previa CSV con datos de ejemplo](importacion-csv.png)
 
 Pruebas: migración repetible, orden fijo, exclusión del pasado, inclusión de hoy y 2040, fechas imposibles, montos, delimitadores, comillas, cuentas, categorías e importaciones duplicadas. También se verificó la aparición de un pago de 2040 en Movimientos en un entorno de ejemplo.
+
+
+## Insights y captura de importes
+
+Insights reúne dinero disponible, deuda actual, pendientes y vencidos, separados por moneda. Una gráfica de barras resume las seis principales categorías de gasto realizado. Los botones de cuentas abren el historial completo, sin filtro mensual, y una gráfica del saldo proyectado.
+
+Cada fila muestra el movimiento, saldo realizado y saldo proyectado desde el saldo inicial. Los movimientos previos a la fecha inicial se conservan visibles sin un saldo reconstruido. En celular las filas se presentan como tarjetas para evitar desplazamiento horizontal.
+
+La proyección de liquidación recorre cargos y pagos registrados; no atribuye intereses desconocidos. Si un cargo posterior vuelve a dejar deuda, no presenta una liquidación anterior como definitiva. Cuando los pagos no cubren la deuda, muestra el faltante. Los pendientes vencidos se proyectan para hoy y se identifican como tales. Las cuentas de préstamos por cobrar usan el sentido inverso del saldo para estimar la fecha de cobro.
+
+```js
+const cambio = (movimiento.to === cuenta ? importeRecibido : 0)
+             - (movimiento.from === cuenta ? importe : 0);
+// Realizado: solo movimientos confirmados.
+// Proyectado: incluye también los programados.
+```
+
+![Insights con cuentas e historial de ejemplo](insights.png)
+
+Duplicar abre un formulario con la fecha local de hoy y copia los datos descriptivos, cuentas, importes y estado. La copia solo se guarda al confirmar el formulario. No hereda identificadores ni vínculos con reglas, importaciones o nóminas. Duplicar una compra MSI permite definir un nuevo plan.
+
+Los campos monetarios usan teclado decimal y separadores de miles durante la captura, con dos decimales al terminar. El valor numérico se conserva por separado del texto formateado para cálculos y guardado. El botón Calcular abre un teclado con suma, resta, multiplicación, división y paréntesis. El evaluador admite únicamente aritmética, aplica precedencia y redondea a centavos; no ejecuta código.
+
+![Calculadora de importes en móvil, datos de ejemplo](calculadora-movil.png)
+
+El botón flotante «+» permite abrir Nuevo movimiento desde cualquier sección. Tiene nombre accesible y se ubica por encima de la navegación móvil. Se verificaron cálculos financieros, duplicación independiente, cuentas por cobrar, deudas reabiertas, vencidos, captura formateada, guardado de una copia y distribución a 390 px de ancho. El teclado nativo depende del dispositivo; la vista móvil se comprobó mediante una ventana de prueba, sin un teléfono físico.
