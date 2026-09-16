@@ -1,0 +1,3 @@
+const groups=[{name:'Débito, efectivo, ahorro y vales',types:['debit','cash','saving','vouchers']},{name:'Tarjetas de crédito y deudas por pagar',types:['credit','loan']},{name:'Préstamos por cobrar',types:['receivable']}];
+export function orderedAccounts(accounts){return groups.flatMap(g=>accounts.filter(a=>g.types.includes(a.type))).concat(accounts.filter(a=>!groups.some(g=>g.types.includes(a.type))));}
+export function groupedAccounts(accounts,render){return groups.map(g=>{const rows=accounts.filter(a=>g.types.includes(a.type));return rows.length?`<h3 class="account-group-label">${g.name}</h3>${rows.map(render).join('')}`:'';}).join('')+accounts.filter(a=>!groups.some(g=>g.types.includes(a.type))).map(render).join('');}

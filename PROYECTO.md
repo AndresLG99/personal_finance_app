@@ -272,3 +272,22 @@ if (transaction.status === 'pending') refreshPending(book);
 ```
 
 ![Acciones de Insights en celular, con datos de ejemplo](insights-acciones-movil.png)
+
+
+### Cuentas agrupadas y registro personal
+Insights y Configuración agrupan las cuentas en tres bloques: débito/efectivo/ahorro/vales, tarjetas/deudas, y préstamos por cobrar. Cada bloque usa un encabezado discreto y una línea tenue; solo aparecen los grupos que tienen cuentas. El orden no modifica los registros ni los saldos.
+
+El diálogo de acceso permite pasar a Crear cuenta, captura correo y contraseña con confirmación y utiliza Supabase Auth. El nuevo usuario empieza con un documento vacío; la política de lectura y la función de guardado siguen usando auth.uid().
+
+```js
+await client.auth.signUp({
+  email, password,
+  options: { emailRedirectTo: new URL('./', location.href).href }
+});
+```
+
+Configuración requerida en Supabase: permitir altas por correo; configurar la URL pública https://andreslg99.github.io/personal_finance_app/ como Site URL y redirect permitido. Si la confirmación de correo está activa, se necesita un proveedor SMTP para enviar a personas fuera del equipo de Supabase (https://supabase.com/docs/guides/auth/auth-smtp). La UI muestra los errores de configuración sin registrar datos financieros de otro usuario. No se ha probado aún un alta real de principio a fin ni el aislamiento con dos cuentas reales. Estas verificaciones requieren acceso al panel y correos de prueba autorizados.
+
+![Grupos de cuentas con datos de ejemplo](cuentas-agrupadas.png)
+
+![Formulario de registro](registro-usuarios.png)
