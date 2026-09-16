@@ -1,0 +1,23 @@
+import {balance,monthDate,today} from './finance.js?v=20260915-3';
+const addDays=(date,n)=>{const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+export function accountTimeline(state,account,start=today()){
+ const end=addDays(start,30),events=new Map();
+ const add=(date,event)=>{if(date>=start&&date<=end){if(!events.has(date))events.set(date,[]);events.get(date).push(event);}};
+ for(let offset=0;offset<=2;offset++){
+  if(account.type==='credit'&&account.cut)add(monthDate(start,offset,account.cut),{label:'Fecha de corte',type:'cut'});
+  if(['credit','loan'].includes(account.type)&&account.pay)add(monthDate(start,offset,account.pay),{label:'Fecha de pago',type:'due'});
+ }
+ for(const t of state.transactions){if(t.status!=='pending'||(t.from!==account.id&&t.to!==account.id))continue;
+  add(t.date,{label:`${t.kind==='payment'?'Pago programado':'Movimiento programado'} · ${t.concept}`,type:'scheduled',amount:(t.to===account.id?(t.received??t.amount):0)-(t.from===account.id?t.amount:0),neutral:t.kind==='transfer'});
+ }
+ return {start,end,days:Array.from({length:31},(_,i)=>{const date=addDays(start,i);return {date,value:date<account.asOf?null:balance(state,account.id,date,true)};}),events:[...events].sort(([a],[b])=>a.localeCompare(b)).map(([date,items])=>({date,items}))};
+}
+export function timelineView(state,account,money,esc){
+ const model=accountTimeline(state,account),values=model.days.filter(d=>d.value!==null),short=date=>new Intl.DateTimeFormat('es-MX',{day:'2-digit',month:'short',timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));
+ const width=Math.max(680,(model.events.length+2)*65),left=65,right=width-65,top=48,bottom=205;
+ const min=values.length?Math.min(...values.map(d=>d.value)):0,max=values.length?Math.max(...values.map(d=>d.value)):0,pad=Math.max((max-min)*.12,100),low=min-pad,high=max+pad;
+ const x=date=>left+(new Date(date+'T12:00:00Z')-new Date(model.start+'T12:00:00Z'))/86400000/30*(right-left),y=value=>bottom-(value-low)/(high-low)*(bottom-top);
+ const path=values.map((d,i)=>i?`H${x(d.date)} V${y(d.value)}`:`M${x(d.date)},${y(d.value)}`).join(' ');
+ const ticks=[model.start,...model.events.map(e=>e.date).filter(d=>d!==model.start&&d!==model.end),model.end];
+ return `<figure class="account-timeline"><figcaption>Próximos 30 días · ${esc(account.currency)}</figcaption><p class="subtle">Del ${model.start} al ${model.end}. Saldo proyectado al cierre de cada día, incluidos los pendientes anteriores. Las fechas de corte y pago son recordatorios; solo los movimientos registrados cambian el saldo.</p><div class="timeline-events">${model.events.map((e,i)=>`<div class="timeline-event"><strong><span class="timeline-number">${i+1}</span> ${short(e.date)}</strong>${e.items.map(item=>`<div>${esc(item.label)}${item.amount===undefined?'':` · ${money(item.amount,account.currency,item.neutral?'neutral':undefined)}`}</div>`).join('')}</div>`).join('')||'<p class="subtle">Sin fechas importantes registradas en este periodo.</p>'}</div><div class="chart-labels"><span>Máximo ${values.length?money(max,account.currency):'—'}</span><span>Mínimo ${values.length?money(min,account.currency):'—'}</span></div><div class="timeline-scroll" tabindex="0" aria-label="Gráfica de los próximos 30 días; desliza para ver todas las fechas"><svg viewBox="0 0 ${width} 285" style="min-width:${width}px" role="img" aria-label="Saldo proyectado de ${esc(account.name)} desde ${model.start} hasta ${model.end}. Las marcas numeradas corresponden a las fechas descritas arriba."><line x1="${left}" x2="${right}" y1="${bottom}" y2="${bottom}" stroke="#ffffff30"/>${model.events.map((e,i)=>`<g><title>${esc(e.date+' · '+e.items.map(t=>t.label).join('; '))}</title><line x1="${x(e.date)}" x2="${x(e.date)}" y1="30" y2="${bottom}" stroke="#b9a6a3" stroke-dasharray="4 5" opacity=".6"/><circle cx="${x(e.date)}" cy="18" r="12" fill="#432525"/><text x="${x(e.date)}" y="22" text-anchor="middle" fill="#fff" font-size="12">${i+1}</text></g>`).join('')}<path d="${path}" fill="none" stroke="#ff827a" stroke-width="3"/>${ticks.map((date,i)=>`<text x="${x(date)}" y="${i%2?255:235}" text-anchor="middle" fill="#b9b6bd" font-size="12">${date===model.start?'Hoy · ':date===model.end?'+30 días · ':''}${short(date)}</text>`).join('')}</svg></div>${values.length?'':'<p class="subtle">El saldo inicial de esta cuenta empieza después del periodo mostrado.</p>'}<details><summary>Ver saldos diarios de la gráfica</summary><div class="timeline-daily">${model.days.map(d=>`<div><span>${d.date}</span><span>${d.value===null?'Sin saldo inicial':money(d.value,account.currency)}</span></div>`).join('')}</div></details></figure>`;
+}

@@ -291,3 +291,19 @@ Configuración requerida en Supabase: permitir altas por correo; configurar la U
 ![Grupos de cuentas con datos de ejemplo](cuentas-agrupadas.png)
 
 ![Formulario de registro](registro-usuarios.png)
+
+
+### Timeline de los próximos 30 días
+La gráfica por cuenta utiliza dos extremos fijos: fecha local actual y 30 días después. Muestra el saldo proyectado al cierre de cada día; los cambios aparecen como escalones en la fecha correspondiente. Las fechas de pago, corte y movimientos programados se señalan con líneas verticales numeradas y descripciones con importes encima de la gráfica. Los eventos del mismo día se agrupan. Los días 29–31 se ajustan al último día de los meses cortos. La tabla conserva todo el historial.
+
+```js
+const end = addDays(today(), 30);
+const projected = balance(state, account.id, date, true);
+// Las fechas de corte y vencimiento son recordatorios: no generan cargos.
+```
+
+La gráfica permite desplazamiento horizontal en móvil para conservar la legibilidad y ofrece los 31 saldos diarios en una lista desplegable. Las pruebas cubren extremos del intervalo, febrero y año bisiesto, saldo inicial futuro, aislamiento por cuenta e importes destino en otra moneda.
+
+![Timeline de una tarjeta, con datos de ejemplo](timeline-30-dias.png)
+
+Correo: se eligió Brevo Free como opción de envío (300 envíos diarios según su documentación al revisar). Queda pendiente la creación/verificación de la cuenta por el propietario y conexión de sus credenciales SMTP en Supabase. No se guardan claves en el repositorio. La URL pública de retorno ya fue configurada en Supabase.
