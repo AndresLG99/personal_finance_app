@@ -31,3 +31,6 @@ El propietario confirmó inicio de sesión, guardado tras recarga y lectura desd
 Importación validada del Excel, conciliación de cuotas MSI con pagos globales, reestructuración de planes y restauración de respaldos. La tabla usa un documento JSONB por usuario con control de revisión; para mayor volumen se recomienda normalizar el modelo.
 
 Las capturas de documentación contienen datos de ejemplo. No se ejecutan pagos bancarios.
+
+## Identidad visual
+La cabecera usa una cartera minimalista en blanco sobre el degradado rojo de la app, compartida por todos los usuarios. No representa las iniciales del usuario. El propietario verificó el registro de una nueva cuenta, la recepción y confirmación del correo de Brevo y el inicio de sesión posterior.
