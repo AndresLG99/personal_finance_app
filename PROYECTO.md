@@ -307,3 +307,19 @@ La gráfica permite desplazamiento horizontal en móvil para conservar la legibi
 ![Timeline de una tarjeta, con datos de ejemplo](timeline-30-dias.png)
 
 Correo: se eligió Brevo Free como opción de envío (300 envíos diarios según su documentación al revisar). Queda pendiente la creación/verificación de la cuenta por el propietario y conexión de sus credenciales SMTP en Supabase. No se guardan claves en el repositorio. La URL pública de retorno ya fue configurada en Supabase.
+
+
+## Bienvenida y consulta diaria
+La guía de seis pasos se abre al cargar una cuenta autenticada sin registros y sin una bienvenida completada u omitida. Puede repetirse desde Configuración. Su estado se guarda en el documento privado del usuario y se sincroniza entre dispositivos.
+
+![Tutorial de bienvenida con datos de ejemplo](tutorial.png)
+
+Insights es la pantalla inicial. Su historial completo conserva todas las fechas, separado en realizados descendentes y programados ascendentes. Movimientos muestra realizados de hoy y programados entre hoy y hoy + 30 días, inclusive. Los vencidos se consultan en Insights.
+
+```js
+// La edición conserva la hora del registro inicial.
+if (previous.createdAt) transaction.createdAt = previous.createdAt;
+// El orden de visualización no cambia el cálculo cronológico de los saldos.
+```
+
+La fecha de la operación es el primer criterio; la hora de creación resuelve el orden dentro del día. Los registros históricos sin hora conservan su orden de inserción. Duplicar crea una nueva hora de registro. Pruebas: límites de 30 días, exclusión de ayer, orden por hora, conservación al editar y elegibilidad de bienvenida.

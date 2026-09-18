@@ -18,3 +18,5 @@
 
 /* Shared wallet identity for every user. */
 .brand{width:40px;height:40px;flex:0 0 40px;display:grid;place-items:center;padding:8px;border-radius:12px}.brand svg{display:block;width:24px;height:24px}
+
+.welcome{width:min(580px,calc(100% - 24px));padding:28px}.welcome-top,.welcome-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.welcome-top button{font-size:13px}.welcome progress{width:100%;height:5px;accent-color:#ff3b30}.welcome h2{font-size:30px;line-height:1.15;margin:24px 0 12px}.welcome-label{color:#ff827a;font-weight:600}.welcome aside{background:#ffffff06;border:1px solid var(--line);border-radius:16px;padding:16px;color:#d4d4d8}.welcome-actions{margin-top:24px}.welcome [role=alert]{color:#ff827a}.welcome button{min-height:44px}@media(max-width:480px){.welcome{padding:20px}.welcome h2{font-size:26px}.welcome-top{align-items:flex-start}.welcome-top .eyebrow{font-size:11px}}
