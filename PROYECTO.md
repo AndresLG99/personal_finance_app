@@ -323,3 +323,16 @@ if (previous.createdAt) transaction.createdAt = previous.createdAt;
 ```
 
 La fecha de la operación es el primer criterio; la hora de creación resuelve el orden dentro del día. Los registros históricos sin hora conservan su orden de inserción. Duplicar crea una nueva hora de registro. Pruebas: límites de 30 días, exclusión de ayer, orden por hora, conservación al editar y elegibilidad de bienvenida.
+
+
+## Cuentas con estilo Wallet
+Las cuentas conservan su información y agrupación, con superficies de tarjeta, degradados por institución reconocida o tipo de cuenta, y selección visible en Insights. En móvil se presentan en una columna sin ocultar información. No se inventan números, CLABE ni redes de pago.
+
+Los negocios reconocidos muestran iconos locales: Walmart, Starbucks, OXXO, 7-Eleven, Amazon, Netflix, Spotify, Uber, Apple, Costco y McDonald's. Se usa el negocio registrado; si está vacío, el concepto. Las demás operaciones conservan un símbolo por tipo. Los iconos se obtuvieron del servicio público de favicons de Google usando los dominios de las marcas y se incorporaron a merchant-icons.js; la app no consulta servicios de logos durante su uso. Marcas e iconos pertenecen a sus respectivos titulares.
+
+```js
+const theme = walletTheme(account);
+const icon = merchantIcon(transaction);
+```
+
+![Cuentas Wallet con datos de ejemplo](wallet-cuentas.png)
