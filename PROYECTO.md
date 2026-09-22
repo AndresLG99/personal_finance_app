@@ -336,3 +336,22 @@ const icon = merchantIcon(transaction);
 ```
 
 ![Cuentas Wallet con datos de ejemplo](wallet-cuentas.png)
+
+
+## Ajustes de acceso y uso — 22 de septiembre de 2026
+- Contraseñas con botón de visibilidad en ingreso y registro, incluida confirmación.
+- Ingresos recurrentes independientes de nómina. Se generan como pendientes hacia la cuenta destino y se preservan las ocurrencias realizadas o ajustadas al editar la regla.
+- Modelo y color elegibles por cuenta; Liverpool rosa y AMEX plateada por defecto. Insights muestra límite disponible, día de corte y pago.
+- Editar, duplicar y eliminar en Movimientos, historial de Insights y movimientos del calendario. Iconos accesibles también para cuentas, recurrencias y desglose de nómina.
+- Guía de ocho pasos que navega y desplaza la pantalla a la sección correspondiente. Se puede interactuar con la app mientras se consulta. Al finalizar se intenta guardar en la nube; si falla, conserva la finalización local por usuario y avisa de que no se sincronizó. Esto no representa guardado de datos financieros.
+- Se verificó EXECUTE para authenticated y una llamada real a save_finance_book dentro de una transacción revertida. No se reprodujo el error original; no se cambiaron permisos. El cliente valida la sesión y reintenta una vez tras renovarla cuando recibe permiso denegado o JWT vencido.
+- Los campos monetarios aceptan operaciones al salir o guardar. El modo con signos solicita el teclado estándar del sistema; el modo decimal sigue disponible. iOS decide sus teclas: inputmode no permite añadir operadores al teclado numérico nativo. Referencia: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inputmode
+
+```js
+// Un ingreso recurrente aumenta la cuenta receptora únicamente al confirmarse.
+{ kind: 'income', from: null, to: rule.to, status: 'pending' }
+```
+
+Validación: regresiones financieras y pruebas de recurrencia semanal, preservación de confirmados, colores, operaciones con signo y recorrido completo del tutorial. El teclado físico de un iPhone requiere comprobación en ese dispositivo.
+
+![Tutorial que navega a cada sección](tutorial-guiado.png)

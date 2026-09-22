@@ -1,4 +1,4 @@
-import {CATEGORIES,canonicalCategory,categoryKey,today} from './finance.js?v=20260915-3';
+import {CATEGORIES,canonicalCategory,categoryKey,today} from './finance.js?v=20260922-1';
 
 export const CSV_TEMPLATE='id,fecha,tipo,concepto,cuenta_origen,cuenta_destino,monto,categoria,negocio,notas,monto_recibido\r\npago-001,2031-01-22,pago,Pago tarjeta,Mi banco,Mi tarjeta,1500.00,Pago de tarjeta,,,\r\n';
 export function parseCSV(text){

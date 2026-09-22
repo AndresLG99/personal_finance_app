@@ -1,3 +1,4 @@
+import {iconButton} from './transaction-actions.js?v=20260922-1';
 export const period=date=>`${date.slice(0,7)} · Quincena ${Number(date.slice(8))<=15?1:2}`;
 export function payrollTotals(lines){
  const totals={earnings:0,deductions:0,information:0,vouchers:0};
@@ -54,7 +55,7 @@ export function openPayroll({state,modal,persist,uid,today,esc,money,existing}){
   const t=payrollTotals(lines);
   const raw=q('[name=bankNet]').value,received=Math.round(Number(raw)*100),difference=received-t.net;
   q('#pay-totals').innerHTML=`<p>Percepciones ${money(t.earnings)} · Deducciones ${money(-t.deductions)}</p><h3>Neto calculado ${money(t.net)}</h3><p>Neto bancario ${raw?money(received):'Por capturar'}</p><p>${!lines.length?'Desglose pendiente':!raw?'Captura el neto bancario para comparar':difference===0?'Sin desviación: ambos netos coinciden':`Desviación (banco − calculado): ${money(difference)} · ${difference>0?'Recibiste más':'Recibiste menos'} que el desglose capturado`}</p><p>Vales informativos ${money(t.vouchers,'MXN','neutral')} · Total informativos ${money(t.information,'MXN','neutral')}</p>`;
-  q('#pay-lines').innerHTML=lines.map((l,i)=>`<div class="row"><div class="grow"><strong>${esc(l.code)} · ${esc(l.concept)}</strong><small>${esc(labels[l.section])} · ${esc(l.company)} · ${l.date} · ${period(l.date)}</small></div>${money(l.section==='deductions'?-l.amount:l.amount,'MXN',l.section==='information'?'neutral':undefined)}<button type="button" data-remove-pay="${i}" aria-label="Quitar ${esc(l.concept)}">Quitar</button></div>`).join('');
+  q('#pay-lines').innerHTML=lines.map((l,i)=>`<div class="row"><div class="grow"><strong>${esc(l.code)} · ${esc(l.concept)}</strong><small>${esc(labels[l.section])} · ${esc(l.company)} · ${l.date} · ${period(l.date)}</small></div>${money(l.section==='deductions'?-l.amount:l.amount,'MXN',l.section==='information'?'neutral':undefined)}${iconButton('delete','remove-pay',i,'Quitar '+l.concept,esc)}</div>`).join('');
   root.querySelectorAll('[data-remove-pay]').forEach(b=>b.onclick=()=>{lines.splice(Number(b.dataset.removePay),1);update();});
  };
  function editor(){

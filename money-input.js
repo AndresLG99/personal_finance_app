@@ -13,7 +13,7 @@ export function enhanceMoneyInputs(root){
   if(original.dataset.moneyReady)return;original.dataset.moneyReady='1';
   const required=original.required,min=original.min,max=original.max;
   const label=original.closest('label'),title=label?.childNodes[0]?.textContent?.trim()||'Importe';
-  const visible=document.createElement('input');visible.type='text';visible.inputMode='decimal';visible.autocomplete='off';visible.placeholder='$0.00';visible.setAttribute('aria-label',title);visible.required=required;visible.className='money-entry';
+  const visible=document.createElement('input');visible.type='text';visible.inputMode=min===''?'text':'decimal';visible.autocomplete='off';visible.placeholder='$0.00';visible.setAttribute('aria-label',title);visible.required=required;visible.className='money-entry';
   original.before(visible);original.type='hidden';original.required=false;
   const desc=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');
   const sync=()=>{visible.value=original.value===''?'':formatted(original.value);visible.setCustomValidity('');};
@@ -22,18 +22,20 @@ export function enhanceMoneyInputs(root){
   visible.oninput=event=>{
    const source=visible.value,decimalComma=event.data===','||!source.includes('$')||event.inputType==='insertFromPaste';
    const text=(decimalComma?source.replace(/,(\d{0,2})$/,(match,decimals)=>source.includes('.')?match:'.'+decimals):source).replace(/[$,\s]/g,''),caret=visible.selectionStart||0,digitsBefore=visible.value.slice(0,caret).replace(/[^\d.\-]/g,'').length;
+   if(/[+*/×÷()]|\d\s*-/.test(text)){desc.set.call(original,'');visible.setCustomValidity('');return;}
    if(!/^-?\d*(\.\d{0,2})?$/.test(text)){visible.setCustomValidity('Usa hasta dos decimales o abre la calculadora.');return;}
    desc.set.call(original,text&&text!=='-'&&text!=='.'?text:'');
    const parts=text.split('.'),negative=parts[0].startsWith('-'),whole=parts[0].replace('-','').replace(/^0+(?=\d)/,'');
    visible.value=text?`${negative?'-$':'$'}${whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')}${parts.length>1?'.'+parts[1]:''}`:'';
    let pos=0,count=0;while(pos<visible.value.length&&count<digitsBefore){if(/[\d.\-]/.test(visible.value[pos]))count++;pos++;}visible.setSelectionRange(pos,pos);validate();original.dispatchEvent(new Event('input',{bubbles:true}));
   };
-  visible.onblur=()=>{if(visible.validity.customError)return;sync();validate();original.dispatchEvent(new Event('change',{bubbles:true}));};
+  visible.onblur=()=>{if(/[+*/×÷()]|\d\s*-/.test(visible.value)){try{original.value=calculate(visible.value).toFixed(2);}catch(e){visible.setCustomValidity(e.message);return;}}if(visible.validity.customError)return;sync();validate();original.dispatchEvent(new Event('change',{bubbles:true}));};
+  const keyboard=document.createElement('button');keyboard.type='button';keyboard.className='calculator-trigger';const keyboardLabel=()=>keyboard.textContent=visible.inputMode==='decimal'?'Teclado con signos (+ − × ÷)':'Teclado numérico';keyboardLabel();keyboard.onclick=()=>{visible.inputMode=visible.inputMode==='decimal'?'text':'decimal';keyboardLabel();visible.blur();visible.focus();};visible.after(keyboard);
   const trigger=document.createElement('button');trigger.type='button';trigger.className='calculator-trigger';trigger.textContent='▦ Calcular';trigger.setAttribute('aria-label',`Calcular ${title}`);visible.after(trigger);
   trigger.onclick=()=>{
    root.querySelectorAll('.money-calculator').forEach(n=>n.remove());
    const panel=document.createElement('div');panel.className='money-calculator';panel.setAttribute('role','group');panel.setAttribute('aria-label',`Calculadora de ${title}`);
-   const expression=document.createElement('input');expression.type='text';expression.inputMode='decimal';expression.setAttribute('aria-label','Operación');expression.placeholder='Ejemplo: 150 + 80 × 2';
+   const expression=document.createElement('input');expression.type='text';expression.inputMode='text';expression.setAttribute('aria-label','Operación');expression.placeholder='Ejemplo: 150 + 80 × 2';
    const result=document.createElement('output');result.setAttribute('aria-live','polite');const keys=document.createElement('div');keys.className='calculator-keys';
    const preview=()=>{try{result.textContent=formatted(calculate(expression.value));}catch(e){result.textContent=e.message;}};
    for(const key of ['7','8','9','÷','4','5','6','×','1','2','3','−','0','.','(',')','+','⌫','C']){const b=document.createElement('button');b.type='button';b.textContent=key;b.onclick=()=>{if(key==='C')expression.value='';else if(key==='⌫')expression.value=expression.value.slice(0,-1);else expression.value+=key==='−'?'-':key;preview();};keys.append(b);}

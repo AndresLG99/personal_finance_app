@@ -1,4 +1,4 @@
-import {balance,monthDate,today} from './finance.js?v=20260915-3';
+import {balance,monthDate,today} from './finance.js?v=20260922-1';
 const addDays=(date,n)=>{const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 export function accountTimeline(state,account,start=today()){
  const end=addDays(start,30),events=new Map();

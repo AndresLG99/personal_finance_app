@@ -43,7 +43,7 @@ export function saveRule(state,rule,uid){
  for(let i=0;i<r.count;i++){
   const date=recurringDate(r.first,i,r.every,r.unit);if(protectedDates.has(date)||protectedSlots.has(i))continue;
   const previous=linked.find(t=>t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)===date);
-  next.transactions.push({id:previous?.id||uid(),parent:r.id,kind:'expense',concept:r.concept,category:r.category||'',business:r.business||'',from:r.from,amount:r.amount,date,status:'pending'});
+  next.transactions.push({id:previous?.id||uid(),parent:r.id,kind:r.kind==='income'?'income':'expense',concept:r.concept,category:r.category||'',business:r.business||'',from:r.kind==='income'?null:r.from,to:r.kind==='income'?r.to:null,amount:r.amount,date,status:'pending'});
  }
  return next;
 }
@@ -68,7 +68,7 @@ export function saveTransactionEdit(state,item,scope='one'){
  const fields=['concept','category','business','notes','amount','received','from','to','fx'];
  if(scope==='future'&&old.status==='pending'&&item.status==='pending'&&old.parent){
  for(const t of state.transactions){if(t.id!==old.id&&t.parent===old.parent&&t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)>=anchor){for(const key of fields)t[key]=item[key];}}
- const rule=state.rules.find(r=>r.id===old.parent);if(rule)for(const key of ['concept','category','business','notes','amount','from'])rule[key]=item[key];
+ const rule=state.rules.find(r=>r.id===old.parent);if(rule)for(const key of ['concept','category','business','notes','amount','from','to'])rule[key]=item[key];
  }
  item.scheduledDate=old.scheduledDate||old.date;
  item.individualOverride=scope!=='future';

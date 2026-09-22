@@ -1,4 +1,4 @@
-import {today} from './finance.js?v=20260915-3';
+import {today} from './finance.js?v=20260922-1';
 const cache=new Map();
 export function crossCurrency(t,accounts){const a=accounts.find(a=>a.id===t.from),b=accounts.find(a=>a.id===t.to);return ['payment','transfer'].includes(t.kind)&&a&&b&&a.currency!==b.currency?{from:a.currency,to:b.currency}:null;}
 export async function quote(from,to,date=today(),fetcher=fetch){
