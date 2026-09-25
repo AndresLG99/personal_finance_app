@@ -355,3 +355,21 @@ const icon = merchantIcon(transaction);
 Validación: regresiones financieras y pruebas de recurrencia semanal, preservación de confirmados, colores, operaciones con signo y recorrido completo del tutorial. El teclado físico de un iPhone requiere comprobación en ese dispositivo.
 
 ![Tutorial que navega a cada sección](tutorial-guiado.png)
+
+
+## Septiembre 2026: asignación de gastos y navegación diaria
+
+Al guardar un gasto en una tarjeta de crédito o deuda por pagar, aparece un segundo formulario para sumarlo a un pago pendiente de esa misma cuenta. Muestra fecha, concepto e importe antes y después. El gasto ya está guardado; cerrar el aviso no lo elimina. Si no hay pagos elegibles, explica cómo crear uno. Al editar un gasto sin asignación puede retomarse este paso.
+
+![Asignar un gasto a un pago; datos ficticios](asignacion-pago.png)
+
+La asignación afecta solo al pago elegido, protege esa ocurrencia de regeneraciones de la recurrencia y conserva las fechas. Se registra la relación en el gasto para impedir sumarlo dos veces. En otra moneda, el importe de destino queda como referencia y el origen sigue la tasa estimada. Una edición o eliminación posterior del gasto requiere revisar su pago: se muestra esta advertencia en el formulario.
+
+```js
+const next = allocateExpense(state, expenseId, paymentId);
+await persist(next); // revisión optimista del documento privado
+```
+
+Insights reúne los indicadores, las tarjetas, la gráfica de 30 días y las listas de realizados de hoy y programados de hoy a 30 días. Movimientos contiene el historial completo por cuenta, separado entre realizados y programados, con el mismo formato de filas y los saldos tras cada operación. No se aplica filtro mensual al historial. Ambos conservan modificar, duplicar, eliminar y confirmar pendientes. El tutorial señala las nuevas ubicaciones.
+
+Volver a tocar la pestaña activa desplaza la página al inicio; también funciona en escritorio. Pruebas automatizadas: aislamiento de recurrencia, centavos, rechazo de asignaciones repetidas, pagos no elegibles, conversión entre monedas y separación de vistas. Prueba de navegador con datos ficticios: gasto de $250 que incrementa un pago de $1,500 a $1,750. No se modificaron datos financieros reales durante estas pruebas.

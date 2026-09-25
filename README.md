@@ -4,7 +4,7 @@ Aplicación personal con GitHub Pages y Supabase. Interfaz adaptable a computado
 
 ## Funciones
 - Movimientos realizados y programados, con duplicación a la fecha actual.
-- Insights: gastos por categoría, historial completo por cuenta y fechas de liquidación proyectadas.
+- Insights: gastos por categoría, actividad de hoy, próximos 30 días y fechas de liquidación proyectadas. Movimientos: historial completo por cuenta y saldos tras cada operación.
 - Captura monetaria con teclado decimal, calculadora y botón flotante para registrar movimientos.
 - Transferencias entre cuentas y entre MXN/CAD.
 - Calendario de saldos reales y proyectados.
@@ -34,3 +34,5 @@ Las capturas de documentación contienen datos de ejemplo. No se ejecutan pagos 
 
 ## Identidad visual
 La cabecera usa una cartera minimalista en blanco sobre el degradado rojo de la app, compartida por todos los usuarios. No representa las iniciales del usuario. El propietario verificó el registro de una nueva cuenta, la recepción y confirmación del correo de Brevo y el inicio de sesión posterior.
+
+- Asignación de gastos de crédito/deuda a un pago programado existente, con vista previa del incremento.
