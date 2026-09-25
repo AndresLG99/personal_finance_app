@@ -376,3 +376,31 @@ Volver a tocar la pestaña activa desplaza la página al inicio; también funcio
 
 ### Separación de listas por cuenta
 Realizados y Programados se presentan como dos paneles independientes con 22 px de separación, sin una tarjeta exterior que los una. Se conserva la lógica de saldos y los registros existentes.
+
+## Rediseño adaptable inspirado en Liquid Glass
+
+La versión de septiembre de 2026 conserva la paleta roja y el tema oscuro, con un diseño web inspirado en los [materiales de Apple](https://developer.apple.com/design/human-interface-guidelines/materials). Es una implementación propia en HTML/CSS, no un componente nativo de iOS.
+
+- Celular: barra inferior con iconos y texto, botones de acciones de 44 px, tarjetas y filas que se reorganizan en una columna, formularios tipo hoja inferior y respeto por las áreas seguras del dispositivo.
+- Computadora: barra lateral persistente desde 1100 px, más espacio para cuentas y formularios de dos columnas.
+- Tamaño intermedio: navegación superior adhesiva entre 801 y 1099 px.
+- Capas: reflejo interior sutil, sombras suaves, navegación translúcida y fondo de los diálogos desenfocado. Las superficies de contenido conservan contraste para leer números.
+- Accesibilidad: foco visible, pestaña actual identificada para lectores de pantalla, preferencias de movimiento reducido y alternativas para mayor contraste o menor transparencia.
+
+```css
+nav, dialog {
+  backdrop-filter: blur(28px) saturate(145%);
+  box-shadow: 0 20px 50px #0004, inset 0 1px 0 #ffffff15;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+```
+
+El estilo adaptable se mantiene en `interface.css`, separado de los cálculos financieros. Se verificaron anchos de 320, 390, 1024 y 1440 px sin desbordamiento horizontal en las vistas revisadas; calendario en pantalla pequeña, apertura/cierre de formularios y guardado con datos ficticios. Las pruebas se hicieron en navegador Chromium con tamaños de pantalla ajustados, no en un iPhone físico: el comportamiento del teclado y Safari requiere comprobación en el dispositivo.
+
+![Interfaz de escritorio con navegación lateral](interfaz-escritorio.png)
+
+![Interfaz móvil con navegación inferior](interfaz-movil.png)
+
+![Formulario móvil como hoja inferior](interfaz-formulario.png)
