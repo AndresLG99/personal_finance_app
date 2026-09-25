@@ -30,3 +30,6 @@
 .password-wrap{display:flex;gap:8px;align-items:center}.password-wrap input{flex:1;width:0}.password-wrap .icon-action{flex:0 0 44px}.wallet-pink{--wallet-top:#ad2368;--wallet-bottom:#3c0b28}.wallet-silver{--wallet-top:#777f89;--wallet-bottom:#252a33}.welcome[open]{position:fixed;inset:auto 20px 20px auto;margin:0;width:min(440px,calc(100% - 24px));max-height:55vh;z-index:20;box-shadow:0 20px 80px #000a;padding:20px}.welcome[open] h2{font-size:24px;margin:14px 0}.welcome[open] aside{font-size:14px;padding:12px}.welcome[open] .welcome-actions{margin-top:12px}.welcome[open] p{margin:10px 0}@media(max-width:800px){.welcome[open]{inset:auto 12px 90px 12px;width:auto;max-height:45vh}}
 
 .welcome[open] .welcome-actions{position:sticky;bottom:-20px;background:#18181b;padding:12px 0;margin-bottom:0;z-index:1}.welcome[open] h2:focus{outline:none}
+
+/* Separate account history lists just like the daily activity panels. */
+.history-ledger{background:none;border:0;padding:0}.history-section+.history-section{margin-top:22px}

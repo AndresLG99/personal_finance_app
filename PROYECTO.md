@@ -373,3 +373,6 @@ await persist(next); // revisión optimista del documento privado
 Insights reúne los indicadores, las tarjetas, la gráfica de 30 días y las listas de realizados de hoy y programados de hoy a 30 días. Movimientos contiene el historial completo por cuenta, separado entre realizados y programados, con el mismo formato de filas y los saldos tras cada operación. No se aplica filtro mensual al historial. Ambos conservan modificar, duplicar, eliminar y confirmar pendientes. El tutorial señala las nuevas ubicaciones.
 
 Volver a tocar la pestaña activa desplaza la página al inicio; también funciona en escritorio. Pruebas automatizadas: aislamiento de recurrencia, centavos, rechazo de asignaciones repetidas, pagos no elegibles, conversión entre monedas y separación de vistas. Prueba de navegador con datos ficticios: gasto de $250 que incrementa un pago de $1,500 a $1,750. No se modificaron datos financieros reales durante estas pruebas.
+
+### Separación de listas por cuenta
+Realizados y Programados se presentan como dos paneles independientes con 22 px de separación, sin una tarjeta exterior que los una. Se conserva la lógica de saldos y los registros existentes.
