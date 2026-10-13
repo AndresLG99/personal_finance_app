@@ -1,35 +1,98 @@
-:root{color-scheme:dark;--bg:#09090b;--surface:rgba(24,24,27,.74);--text:#f5f5f7;--muted:#a1a1aa;--line:rgba(255,255,255,.09);--red:#ff3b30;--red2:#991b1b}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 5%,#ff3b301c,transparent 34%),var(--bg);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);min-height:100vh}button,input,select{font:inherit}button{cursor:pointer;background:#ffffff09;color:var(--text);border:1px solid var(--line);border-radius:13px;padding:10px 15px}button:hover{background:#ffffff16}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #ff827a;outline-offset:3px}button:disabled{opacity:.45;cursor:wait}.primary,.brand{background:linear-gradient(145deg,var(--red),var(--red2));color:white}header{display:flex;align-items:center;gap:12px;max-width:1240px;margin:20px auto;padding:12px 18px;border:1px solid var(--line);border-radius:22px;background:#ffffff06;backdrop-filter:blur(24px)}header span{margin-left:auto;font-size:14px;color:var(--muted)}.brand{padding:8px;border-radius:12px;font-weight:800}main{max-width:1200px;margin:40px auto 80px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.eyebrow{color:#ff827a;font-size:13px;letter-spacing:.13em;font-weight:700}h1{font-size:42px;letter-spacing:-.045em;margin:0 0 25px}h2{font-size:22px;letter-spacing:-.03em}h3{margin:0}nav{display:flex;gap:6px;background:#ffffff05;border:1px solid var(--line);padding:6px;border-radius:17px;width:fit-content;margin-bottom:26px}nav button{border:0;color:var(--muted)}nav button.active{background:#ffffff14;color:white}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:24px 0}.card,.panel{background:linear-gradient(180deg,#ffffff09,#ffffff03);border:1px solid var(--line);border-radius:24px;padding:22px}.card small,.muted{color:var(--muted)}.card strong{display:block;font-size:27px;letter-spacing:-.04em;margin-top:7px}.card:first-child{background:linear-gradient(135deg,#ff3b3021,#991b1b13)}.filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}input,select{color:var(--text);background:#1d1d21;border:1px solid #ffffff1a;border-radius:12px;padding:11px;min-width:0}input[type=search]{flex:1}.row{display:flex;align-items:center;gap:15px;padding:18px 0;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.row .grow{flex:1}.row small{display:block;color:var(--muted);font-size:14px}.amount{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.positive{color:#66dbaa}.badge{font-size:13px;color:#ffbd87;background:#ffae6710;padding:4px 9px;border-radius:20px}.icon{width:42px;height:42px;display:grid;place-items:center;background:#ffffff08;border-radius:14px;color:#ff827a;font-size:22px}.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:22px}.accounts{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.calendar button{padding:12px 4px;min-height:66px}.calendar button.selected{border-color:#ff827a;background:#ff3b3020}.calendar small{display:block;color:#ff827a}.weekday{text-align:center;color:var(--muted);font-size:14px;padding:8px}.empty{padding:35px 5px;color:var(--muted);text-align:center}dialog{width:min(560px,calc(100% - 24px));max-height:90vh;overflow:auto;background:#18181b;border:1px solid #ffffff20;border-radius:26px;color:var(--text);padding:26px}dialog::backdrop{background:#0009;backdrop-filter:blur(8px)}label{display:flex;flex-direction:column;gap:6px;margin:15px 0;color:#d4d4d8;font-size:14px}#error{color:#ff827a}#notice{color:#ffbd87;font-size:14px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:24px 0 12px}.subtle{font-size:14px;color:var(--muted)}@media(max-width:800px){header{margin:10px}header span{display:none}header button{margin-left:auto}main{margin:28px 16px 110px}h1{font-size:32px}.kpis{grid-template-columns:repeat(2,1fr)}.card{padding:16px}.card strong{font-size:23px}.grid{grid-template-columns:1fr}nav{position:fixed;bottom:12px;left:10px;right:10px;width:auto;justify-content:space-around;z-index:5;background:#202024ed;backdrop-filter:blur(20px)}nav button{font-size:14px;padding:10px 8px}.heading{align-items:center}.heading .primary{font-size:14px}.row{gap:9px;flex-wrap:wrap}.row .grow{min-width:120px}.accounts{grid-template-columns:1fr}.panel{padding:16px}.calendar{gap:3px}.calendar button{min-height:58px}input,select{max-width:100%}}
+:root{
+  --bg:#0C0D12;--surface:#17181E;--surface2:#1F2028;--field:#1B1C23;--line:#FFFFFF14;--line2:#FFFFFF0F;
+  --text:#F5F5F7;--muted:#A8A9B4;--soft:#C9CAD4;--accent:#FF7A4A;--accent-ink:#1A0E08;--accent-soft:#FF9D72;
+  --pos:#57E8B8;--neg:#FF8A7E;--warn:#FFCF6A;--ease:cubic-bezier(.32,.72,0,1);--spring:cubic-bezier(.34,1.3,.64,1);
+  color-scheme:dark;box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  background:#000;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;height:100%;background:#000;color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none;padding:0;transition:transform .18s var(--ease),opacity .18s}
+button:active:not(:disabled){transform:scale(.96);opacity:.85}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #FFB98F;outline-offset:2px}
+button:disabled{cursor:wait;opacity:.5}
+.num{font-variant-numeric:tabular-nums}
+.negative{color:var(--neg)}.positive{color:var(--pos)}.neutral{color:var(--soft)}
+.subtle{font-size:14px;color:var(--muted);line-height:1.55;margin:0}
+.muted{color:var(--muted)}
+.csv-preview{max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:16px;padding:0 14px;background:var(--field)}
+p{margin:10px 0;line-height:1.5}
+details summary{cursor:pointer;padding:10px 0;min-height:44px;display:flex;align-items:center}
+.primary,.btn{height:52px;border-radius:26px;background:var(--accent);color:var(--accent-ink);font-size:17px;font-weight:700;border:1px solid #FFC29E66;box-shadow:inset 0 1px 0 #FFFFFF55;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.primary:hover,.btn:hover{background:#ff8f5c}
+.btn.ghost{background:var(--surface2);color:var(--text);border-color:var(--line);box-shadow:none;font-weight:600}
+.btn.danger{background:#3A1A16;color:#FF9A8B;border-color:#FF8A7E40;box-shadow:none}
+.btn.sm{height:44px;width:auto;padding:0 18px;font-size:15px}
+[hidden]{display:none!important}
 
-@media(min-width:801px){main{width:calc(100% - 48px)}header{width:calc(100% - 32px)}}
+/* ---------- Diálogo de bienvenida (tutorial guiado) ---------- */
+dialog{color:var(--text)}
+dialog::backdrop{background:#07081099;-webkit-backdrop-filter:blur(14px) saturate(70%);backdrop-filter:blur(14px) saturate(70%)}
+.welcome{width:min(420px,calc(100% - 24px));padding:22px;background:linear-gradient(140deg,#272830f5,#171820f8);border:1px solid var(--line);border-radius:26px;box-shadow:0 30px 90px #000a;z-index:40}
+.welcome[open]{position:fixed;inset:auto 20px 20px auto;margin:0;max-height:62vh;overflow:auto}
+.welcome-top,.welcome-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.welcome-top button{font-size:13px;color:var(--accent);background:none;min-height:32px}
+.welcome progress{width:100%;height:5px;accent-color:var(--accent);margin:14px 0}
+.welcome h2{font-size:24px;line-height:1.2;margin:10px 0 10px;letter-spacing:-.3px}
+.welcome-label{color:var(--accent-soft);font-weight:600;font-size:14px}
+.welcome p{font-size:15px;line-height:1.5;color:var(--soft)}
+.welcome aside{background:var(--field);border:1px solid var(--line);border-radius:16px;padding:14px;color:var(--soft);font-size:14px}
+.welcome-actions{margin-top:18px}
+.welcome-actions button{min-height:44px;border-radius:16px;padding:0 16px;background:var(--surface2);border:1px solid var(--line)}
+.welcome-actions .primary{background:var(--accent);color:var(--accent-ink);border-color:#FFC29E66}
+.welcome [role=alert]{color:var(--neg);font-size:13px;min-height:0}
+.welcome .eyebrow{font-size:11px;letter-spacing:.14em;color:var(--accent-soft);font-weight:700}
+@media(max-width:800px){.welcome[open]{inset:auto 12px calc(98px + env(safe-area-inset-bottom)) 12px;max-height:48dvh;width:auto}}
 
-@media(max-width:800px){.filters input[type=search]{flex-basis:100%;width:100%}.filters select{flex:1}}
+/* ---------- Entrada de importes (money-input.js) ---------- */
+.money-entry{width:100%;font-variant-numeric:tabular-nums}
+.money-ops{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 2px}
+.op-btn{min-height:40px;background:var(--surface2);border-radius:12px;border:1px solid var(--line);color:var(--text);font-size:17px;font-weight:600}
+.op-btn:active{background:var(--field)}
 
-.negative{color:#ff6961}.positive{color:#66dbaa}.neutral{color:#a1a1aa}.pay-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:20px 0}.pay-tabs .active{background:#393033;border-color:#ff6961}#pay-editor{padding:16px;border:1px solid #333;border-radius:16px}#pay-editor label{display:block;margin:10px 0}#pay-lines .row{flex-wrap:wrap}#pay-totals{margin:18px 0;padding:12px;border-top:1px solid #444}#line-error{color:#ff6961}
+/* ---------- Mostrar/ocultar contraseña (accessForm) ---------- */
+.password-wrap{display:flex;gap:8px;align-items:center}
+.password-wrap input{flex:1;width:0}
+.password-wrap .icon-action{flex:0 0 44px}
 
-[hidden]{display:none!important}.fab{position:fixed;right:28px;bottom:28px;z-index:8;width:56px;height:56px;padding:0!important;border-radius:50%;font-size:34px!important;line-height:1;box-shadow:0 8px 30px #0008;border:1px solid #ffffff30}.account-buttons{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:24px}.account-tile{display:flex;flex-direction:column;gap:8px;text-align:left;padding:20px;border-radius:22px}.account-tile.selected{border-color:#ff827a;background:#ff3b3014}.account-tile small{color:var(--muted)}.account-ledger{margin-bottom:30px}.ledger-scroll{overflow-x:auto}.ledger-scroll table{width:100%;border-collapse:collapse;min-width:680px;text-align:left;font-variant-numeric:tabular-nums}.ledger-scroll th,.ledger-scroll td{padding:14px 10px;border-bottom:1px solid var(--line)}.ledger-scroll td small{display:block;color:var(--muted);font-size:13px}.ledger-scroll td:not(:first-child){white-space:nowrap}.balance-chart{margin:20px 0}.balance-chart svg{width:100%;max-height:230px;display:block}.chart-labels,.spending-bar>div:first-child{display:flex;justify-content:space-between;gap:12px;font-size:14px}.spending-bar{margin:16px 0}.bar-track{height:9px;background:#ffffff0c;border-radius:10px;margin-top:7px;overflow:hidden}.bar-track>div{height:100%;background:linear-gradient(90deg,#991b1b,#ff827a);border-radius:10px}.money-entry{width:100%;font-variant-numeric:tabular-nums}.calculator-trigger{align-self:flex-start;margin:6px 0;font-size:13px}.money-calculator{background:#101014;padding:14px;border-radius:16px;border:1px solid #ffffff25}.money-calculator>input{width:100%}.money-calculator output{display:block;margin:10px 0;font-size:19px}.calculator-keys{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}.calculator-keys button{min-height:44px}.money-calculator>button{margin:3px}.row{flex-wrap:wrap}.row .grow{min-width:160px}@media(max-width:800px){.fab{right:18px;bottom:calc(100px + env(safe-area-inset-bottom));width:52px;height:52px}main{margin-bottom:180px}nav{bottom:calc(10px + env(safe-area-inset-bottom));gap:2px}nav button{font-size:12px;flex:1;min-height:46px;padding:8px 5px}dialog{padding:18px}.account-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}.account-tile{padding:14px;overflow-wrap:anywhere}.chart-labels{font-size:12px}input{font-size:16px}}
+/* ---------- Conversión de moneda (exchange.js) ---------- */
+.exchange-controls{border:1px solid var(--line);border-radius:16px;padding:14px;margin:4px 0;background:var(--field)}
+.exchange-controls label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);margin:10px 0}
+.exchange-controls select,.exchange-controls input{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:10px;color:var(--text)}
+.exchange-controls[hidden]{display:none}
 
-@media(max-width:800px){.ledger-scroll table{min-width:0}.ledger-scroll thead{display:none}.ledger-scroll tbody,.ledger-scroll tr,.ledger-scroll td{display:block;width:100%}.ledger-scroll tr{padding:12px 0;border-bottom:1px solid var(--line)}.ledger-scroll td{padding:5px 0;border:0;white-space:normal!important}.ledger-scroll td[data-label]{display:flex;justify-content:space-between;gap:8px;font-size:13px}.ledger-scroll td[data-label]::before{content:attr(data-label);color:var(--muted)}}
+/* ---------- Nómina (payroll.js) ---------- */
+.pay-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:14px 0;background:var(--field);border-radius:17px;padding:4px}
+.pay-tabs button{flex:1;padding:9px 5px;font-size:13px;border-radius:13px;color:var(--muted);background:none}
+.pay-tabs .active{background:#FFFFFF16;color:var(--text)}
+#pay-editor{padding:14px;border:1px solid var(--line);border-radius:16px;margin:10px 0;background:var(--field)}
+#pay-editor label{display:block;margin:10px 0;font-size:13px;color:var(--muted)}
+#pay-editor input,#pay-editor select{width:100%;margin-top:4px;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:10px;color:var(--text)}
+#pay-lines .row{flex-wrap:wrap}
+#pay-totals{margin:14px 0;padding:12px;border-top:1px solid var(--line);font-size:14px;color:var(--soft)}
+#pay-totals h3{margin:6px 0}
+#line-error{color:var(--neg);font-size:13px}
+#add-pay-line{margin-top:10px;background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:10px 14px;font-size:14px}
 
-.transaction-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}.icon-action{width:40px;height:40px;padding:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:12px}.icon-action svg{width:18px;height:18px}.icon-action.negative{color:#ff6969}.account-ledger td:first-child .transaction-actions{float:right;margin:0 0 8px 12px}.exchange-controls{grid-column:1/-1;border:1px solid var(--line);border-radius:14px;padding:14px}.exchange-controls[hidden]{display:none}@media(max-width:800px){.account-ledger td:first-child{display:flow-root}.account-ledger td:first-child .transaction-actions{float:none;justify-content:flex-end;margin:0 0 8px}.icon-action{width:44px;height:44px;padding:13px}.row>.transaction-actions{margin-left:auto}}
+/* ---------- Filas genéricas reutilizadas por módulos (nómina, csv) ---------- */
+.row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line2)}
+.row:last-child{border-bottom:0}
+.row .grow{flex:1;min-width:0}
+.row small{display:block;color:var(--muted);font-size:13px}
 
-.account-group-label{grid-column:1/-1;margin:16px 0 2px;padding-top:20px;border-top:1px solid #ffffff10;color:var(--muted);font-size:13px;font-weight:500;letter-spacing:.02em}.account-group-label:first-child{margin-top:0;padding-top:0;border-top:0}
+/* ---------- Agrupación de cuentas (account-groups.js) ---------- */
+.account-group-label{margin:18px 4px 2px;padding-top:16px;border-top:1px solid var(--line2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.account-group-label:first-child{margin-top:0;padding-top:0;border-top:0}
 
-.account-timeline{margin:24px 0}.account-timeline figcaption{font-weight:600}.timeline-events{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:16px 0}.timeline-event{font-size:13px;background:#ffffff04;border:1px solid var(--line);border-radius:14px;padding:12px}.timeline-event>div{margin-top:6px}.timeline-number{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#432525;color:white}.timeline-scroll{overflow-x:auto;margin-top:16px}.timeline-scroll svg{display:block;width:100%;height:auto}.timeline-daily>div{display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid var(--line)}
+/* ---------- Iconos de acción (transaction-actions.js) ---------- */
+.transaction-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.icon-action{width:40px;height:40px;padding:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;background:var(--surface2);border:1px solid var(--line)}
+.icon-action svg{width:18px;height:18px}
+.icon-action.negative{color:var(--neg)}
 
-/* Shared wallet identity for every user. */
-.brand{width:40px;height:40px;flex:0 0 40px;display:grid;place-items:center;padding:8px;border-radius:12px}.brand svg{display:block;width:24px;height:24px}
-
-.welcome{width:min(580px,calc(100% - 24px));padding:28px}.welcome-top,.welcome-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.welcome-top button{font-size:13px}.welcome progress{width:100%;height:5px;accent-color:#ff3b30}.welcome h2{font-size:30px;line-height:1.15;margin:24px 0 12px}.welcome-label{color:#ff827a;font-weight:600}.welcome aside{background:#ffffff06;border:1px solid var(--line);border-radius:16px;padding:16px;color:#d4d4d8}.welcome-actions{margin-top:24px}.welcome [role=alert]{color:#ff827a}.welcome button{min-height:44px}@media(max-width:480px){.welcome{padding:20px}.welcome h2{font-size:26px}.welcome-top{align-items:flex-start}.welcome-top .eyebrow{font-size:11px}}
-
-/* Wallet-inspired account surfaces; no invented card numbers or payment networks. */
-.wallet-card{--wallet-top:#363943;--wallet-bottom:#15171d;position:relative;isolation:isolate;overflow:hidden;background:linear-gradient(125deg,var(--wallet-top),var(--wallet-bottom))!important;border:1px solid #ffffff30;border-radius:24px;box-shadow:inset 0 1px 0 #ffffff30,0 10px 24px #0004;color:#fff;min-height:210px;text-align:left;padding:24px;transition:transform .2s,border-color .2s,box-shadow .2s}
-.wallet-card:before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(120deg,transparent 45%,#ffffff08 45%,#ffffff08 65%,transparent 65%),radial-gradient(ellipse at top right,#ffffff18,transparent 65%)}
-.wallet-blue{--wallet-top:#064eac;--wallet-bottom:#061a45}.wallet-gold{--wallet-top:#75603c;--wallet-bottom:#30271b}.wallet-purple{--wallet-top:#501b85;--wallet-bottom:#1a0b32}.wallet-red{--wallet-top:#a91d28;--wallet-bottom:#370c13}.wallet-green{--wallet-top:#0b6848;--wallet-bottom:#06291e}.wallet-teal{--wallet-top:#135b68;--wallet-bottom:#08272f}
-.wallet-card h3,.account-tile.wallet-card>strong{font-size:24px;letter-spacing:-.035em}.wallet-card small,.wallet-card .muted,.wallet-card .subtle{color:#e1e1e6}.wallet-card .negative{color:#ffb4ae}.wallet-card .positive{color:#9ff5cb}.wallet-card .neutral{color:#e4e4e7}.wallet-card button{background:#0003;border-color:#ffffff30}.wallet-card h2,.wallet-amount{font-size:28px;font-weight:700;letter-spacing:-.035em;margin:12px 0}.wallet-type{text-transform:uppercase;letter-spacing:.1em;font-size:11px;font-weight:700;color:#e5e5eb}.account-tile.wallet-card{gap:8px;min-height:230px}.account-tile.wallet-card.selected{border:2px solid #ffb0a9;box-shadow:0 0 0 3px #ff3b301c,0 12px 28px #0006}.account-tile.wallet-card:hover{transform:translateY(-3px)}.account-buttons{grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:18px}.accounts{gap:18px}.wallet-balance-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.wallet-balance-grid .wallet-card{margin:0;min-height:170px;align-items:flex-start}.wallet-balance-grid .amount{width:100%;text-align:left;font-size:24px}.wallet-balance-grid .amount small{font-size:16px}.merchant-icon{display:inline-grid;place-items:center;width:44px;height:44px;flex:0 0 44px;border-radius:14px;background:#ffffff0b;color:#ffaaa2;font-size:24px;overflow:hidden}.merchant-icon img{object-fit:contain;max-width:100%;padding:3px;border-radius:12px;background:white}.merchant-title{display:flex;gap:10px;align-items:center}.merchant-title strong{min-width:0}.merchant-title .merchant-icon{width:36px;height:36px;flex-basis:36px}.merchant-title img{width:36px;height:36px}@media(max-width:800px){.account-buttons{grid-template-columns:1fr}.wallet-card{padding:22px;border-radius:22px}.account-tile.wallet-card{min-height:215px}.wallet-balance-grid{grid-template-columns:1fr}}@media(prefers-reduced-motion:reduce){.wallet-card{transition:none}.account-tile.wallet-card:hover{transform:none}}
-
-.password-wrap{display:flex;gap:8px;align-items:center}.password-wrap input{flex:1;width:0}.password-wrap .icon-action{flex:0 0 44px}.wallet-pink{--wallet-top:#ad2368;--wallet-bottom:#3c0b28}.wallet-silver{--wallet-top:#777f89;--wallet-bottom:#252a33}.welcome[open]{position:fixed;inset:auto 20px 20px auto;margin:0;width:min(440px,calc(100% - 24px));max-height:55vh;z-index:20;box-shadow:0 20px 80px #000a;padding:20px}.welcome[open] h2{font-size:24px;margin:14px 0}.welcome[open] aside{font-size:14px;padding:12px}.welcome[open] .welcome-actions{margin-top:12px}.welcome[open] p{margin:10px 0}@media(max-width:800px){.welcome[open]{inset:auto 12px 90px 12px;width:auto;max-height:45vh}}
-
-.welcome[open] .welcome-actions{position:sticky;bottom:-20px;background:#18181b;padding:12px 0;margin-bottom:0;z-index:1}.welcome[open] h2:focus{outline:none}
-
-/* Separate account history lists just like the daily activity panels. */
-.history-ledger{background:none;border:0;padding:0}.history-section+.history-section{margin-top:22px}
+/* ---------- Icono de comercio (wallet.js) ---------- */
+.merchant-icon{display:inline-grid;place-items:center;width:44px;height:44px;flex:0 0 44px;border-radius:14px;background:linear-gradient(145deg,#FFFFFF12,#FFFFFF05);color:#FFB98F;font-size:20px;overflow:hidden}
+.merchant-icon img{object-fit:contain;max-width:100%;padding:3px;border-radius:12px;background:#fff}
