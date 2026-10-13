@@ -30,6 +30,14 @@
 //   monthYear), que nunca lo mostraba. Regla general: toda fecha que
 //   muestre su mes debe llevar mayúscula inicial y año — ver pruebas
 //   "shortDate" y "dayLabel" más abajo.
+// - 2026-10-13: las tarjetas de cuenta ("Explorar mis cuentas" en Insights,
+//   "Saldos" en Calendario, "Mis cuentas" en Ajustes) se mostraban todas en
+//   una sola fila, sin separar cuentas líquidas, deudas y cuentas por
+//   cobrar. Se agregó accountGroupSections() en account-groups.js (reusando
+//   las divisiones ya definidas ahí: Líquido = débito/efectivo/ahorro/
+//   vales, Deudas = tarjetas de crédito/deudas por pagar, Por cobrar =
+//   préstamos por cobrar) y se usó en las tres secciones. Ver pruebas
+//   "separa las tarjetas en divisiones Líquido / Deudas / Por cobrar".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -217,6 +225,55 @@ function check(name, cond, detail = '') {
     check('"Se liquida" (shortDate) muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")', false, 'no se encontró la tarjeta de crédito de ejemplo');
     check('el Historial de la cuenta (dayLabel) muestra el mes con mayúscula inicial y el año (p. ej. "Domingo 1 de Dic 2026")', false, 'no se encontró la tarjeta de crédito de ejemplo');
   }
+
+  // ---------- Regresión: las tarjetas de cuenta se agrupan en Líquido / Deudas / Por cobrar ----------
+  // "Explorar mis cuentas" (Insights), "Saldos" (Calendario) y "Mis cuentas"
+  // (Ajustes) mostraban todas las cuentas en una sola fila sin distinguir
+  // entre cuentas líquidas, deudas y cuentas por cobrar. Ahora cada una
+  // separa sus tarjetas con un encabezado por división.
+  const groupsIn = async (containerSel) =>
+    page.evaluate((sel) => {
+      const groups = [...document.querySelectorAll(sel + ' .account-group')];
+      return groups.map((g) => ({
+        label: g.querySelector('.account-group-label')?.textContent.trim() || null,
+        ids: [...g.querySelectorAll('.wallet')].map((w) => w.dataset.id),
+      }));
+    }, containerSel);
+  const checkGrouping = (name, groups) => {
+    const liquido = groups.find((g) => g.label === 'Líquido');
+    const deudas = groups.find((g) => g.label === 'Deudas');
+    check(
+      name,
+      !!liquido &&
+        liquido.ids.includes('bank') &&
+        liquido.ids.includes('cash') &&
+        !!deudas &&
+        deudas.ids.includes('credit') &&
+        groups.indexOf(liquido) < groups.indexOf(deudas),
+      JSON.stringify(groups)
+    );
+  };
+
+  await tap('.tabbar [data-tab="insights"]');
+  await page.waitForTimeout(400);
+  checkGrouping(
+    'Insights: "Explorar mis cuentas" separa las tarjetas en divisiones Líquido / Deudas / Por cobrar',
+    await groupsIn('#s-insights')
+  );
+
+  await tap('.tabbar [data-tab="calendario"]');
+  await page.waitForTimeout(400);
+  checkGrouping(
+    'Calendario: "Saldos" separa las tarjetas en divisiones Líquido / Deudas / Por cobrar',
+    await groupsIn('#s-calendario')
+  );
+
+  await tap('.tabbar [data-tab="ajustes"]');
+  await page.waitForTimeout(400);
+  checkGrouping(
+    'Ajustes: "Mis cuentas" separa las tarjetas en divisiones Líquido / Deudas / Por cobrar',
+    await groupsIn('#s-ajustes')
+  );
 
   // ---------- Layout responsivo: escritorio (≥1100 ancho, ≥700 alto) ----------
   await page.setViewportSize({ width: 1280, height: 900 });

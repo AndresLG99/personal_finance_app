@@ -1,7 +1,7 @@
 import {walletTheme,accountType,merchantIcon} from './wallet.js?v=20260922-1';
 import {chronological} from './activity.js?v=20260917-1';
 import {timelineView} from './timeline.js?v=20260916-2';
-import {orderedAccounts,groupedAccounts} from './account-groups.js?v=20260916-1';
+import {orderedAccounts,groupedAccounts} from './account-groups.js?v=20261012-1';
 import {transactionActions} from './transaction-actions.js?v=20260922-1';
 import {balance,today,debt} from './finance.js?v=20260922-1';
 export const effect=(t,id)=>(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0);
