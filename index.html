@@ -1,1 +1,53 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#09090b"><title>Mis finanzas</title><link rel="stylesheet" href="styles.css?v=20260924-2"><link rel="stylesheet" href="interface.css?v=20260924-3"></head><body><header><div class="brand" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5.5A1.5 1.5 0 0 0 17.5 4h-12A2.5 2.5 0 0 0 3 6.5V17a3 3 0 0 0 3 3h13a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5.5A2.5 2.5 0 0 1 3 4.5"/><path d="M21 11h-4a2 2 0 0 0 0 4h4"/><path d="M17 13h.01"/></svg></div><strong>Mis finanzas</strong><span id="connection">Vista de ejemplo · no se guarda</span><button id="login">Iniciar sesión</button></header><main><div class="heading"><div><p class="eyebrow">TU DINERO, DÍA A DÍA</p><h1 id="title">Movimientos</h1></div><button class="primary fab" id="new" aria-label="Nuevo movimiento" title="Nuevo movimiento">+</button></div><nav aria-label="Secciones"><button data-tab="insights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 8-10"/><path d="M15 5h5v5"/><path d="M3 4v16h18"/></svg><span>Insights</span></button><button data-tab="transactions" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l-4 4 4 4M4 7h16M16 13l4 4-4 4M20 17H4"/></svg><span>Movimientos</span></button><button data-tab="calendar" aria-label="Calendario y Saldos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="4"/><path d="M7 3v4M17 3v4M3 11h18M8 15h2M14 15h2"/></svg><span class="nav-full">Calendario y Saldos</span><span class="nav-short" aria-hidden="true">Calendario</span></button><button data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg><span>Configuración</span></button></nav><div id="notice" role="status"></div><section id="kpis" class="kpis"></section><section id="content"></section></main><dialog id="modal"><form id="form"><div class="heading"><h2 id="modal-title"></h2><button type="button" id="close" aria-label="Cerrar">✕</button></div><div id="fields"></div><p id="error" role="alert"></p><button class="primary" id="save">Guardar</button></form></dialog><script type="module" src="app.js?v=20260924-3"></script></body></html>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0C0D12"><title>Mis finanzas</title><link rel="stylesheet" href="styles.css?v=20261012-1"><link rel="stylesheet" href="interface.css?v=20261012-1"></head><body>
+<div class="app" id="app">
+  <div class="stage" id="stage">
+    <div class="base" id="base">
+      <section class="screen active" data-screen="insights" aria-label="Insights"><div class="scroller" data-key="insights"><div class="content" id="s-insights"></div></div><div class="navbar">Insights</div></section>
+      <section class="screen" data-screen="movimientos" aria-label="Movimientos"><div class="scroller" data-key="movimientos"><div class="content" id="s-movimientos"></div></div><div class="navbar">Movimientos</div></section>
+      <section class="screen" data-screen="calendario" aria-label="Calendario y saldos"><div class="scroller" data-key="calendario"><div class="content" id="s-calendario"></div></div><div class="navbar">Calendario</div></section>
+      <section class="screen" data-screen="ajustes" aria-label="Configuración"><div class="scroller" data-key="ajustes"><div class="content" id="s-ajustes"></div></div><div class="navbar">Configuración</div></section>
+      <div class="dim" data-action="pop"></div>
+    </div>
+    <section class="push" id="push" aria-label="Detalle">
+      <div class="scroller" data-key="push"><div class="content" id="push-content"></div></div>
+      <div class="pushbar" id="pushbar"><button class="back" data-action="pop"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span id="back-label">Insights</span></button><span class="ptitle" id="ptitle"></span></div>
+    </section>
+    <nav class="tabbar" aria-label="Secciones">
+      <div class="tabs">
+        <div class="full"><span class="tpill" id="tpill"></span>
+          <button class="tab" data-tab="insights" aria-current="page"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-10M15 5h5v5"/></svg>Insights</button>
+          <button class="tab" data-tab="movimientos"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3l-4 4 4 4M4 7h16M16 13l4 4-4 4M20 17H4"/></svg>Movimientos</button>
+          <button class="tab" data-tab="calendario"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="4"/><path d="M7 3v4M17 3v4M3 11h18"/></svg>Calendario</button>
+          <button class="tab" data-tab="ajustes"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></svg>Ajustes</button>
+        </div>
+        <button class="mini" data-action="expand" aria-label="Mostrar pestañas"><svg id="mini-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-10M15 5h5v5"/></svg></button>
+      </div>
+      <button class="fab" data-action="new" aria-label="Nuevo movimiento" title="Nuevo movimiento"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A0E08" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    </nav>
+    <nav class="sidenav" aria-label="Secciones">
+      <div class="side-brand"><span class="side-mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5.5A1.5 1.5 0 0 0 17.5 4h-12A2.5 2.5 0 0 0 3 6.5V17a3 3 0 0 0 3 3h13a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5.5A2.5 2.5 0 0 1 3 4.5"/><path d="M21 11h-4a2 2 0 0 0 0 4h4"/><path d="M17 13h.01"/></svg></span><strong>Mis finanzas</strong></div>
+      <button class="side-new" data-action="new"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nuevo movimiento</button>
+      <button class="side-tab" data-tab="insights" aria-current="page"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-10M15 5h5v5"/></svg><span>Insights</span></button>
+      <button class="side-tab" data-tab="movimientos"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3l-4 4 4 4M4 7h16M16 13l4 4-4 4M20 17H4"/></svg><span>Movimientos</span></button>
+      <button class="side-tab" data-tab="calendario"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="4"/><path d="M7 3v4M17 3v4M3 11h18"/></svg><span>Calendario y saldos</span></button>
+      <button class="side-tab" data-tab="ajustes"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></svg><span>Configuración</span></button>
+      <span class="side-foot">Tu espacio personal</span>
+    </nav>
+  </div>
+  <div class="sheet-dim" id="sheet-dim" data-action="close-sheet"></div>
+  <div class="sheet" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="grab"><span></span></div>
+    <div class="sheet-body" id="sheet-body">
+      <form id="form">
+        <div class="sheet-head"><span class="side"></span><h2 id="modal-title" style="font-size:17px"></h2><button type="button" id="close" class="side" data-action="close-sheet" aria-label="Cerrar" style="text-align:right;color:var(--accent);font-size:17px;min-height:44px;background:none">Cerrar</button></div>
+        <div id="fields" class="fields"></div>
+        <p class="err" id="error" role="alert"></p>
+        <button type="submit" class="btn" id="save">Guardar</button>
+      </form>
+    </div>
+  </div>
+  <div id="notice" class="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="payroll-file" accept="application/json,.json" hidden>
+</div>
+<script type="module" src="app.js?v=20261012-1"></script>
+</body></html>
