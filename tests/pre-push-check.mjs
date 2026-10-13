@@ -22,7 +22,14 @@
 //   tenía. Ver prueba "escritorio ancho: los chips de cuenta envuelven...".
 // - 2026-10-13: shortDate() (usado en "Se liquida", "Saldo más bajo" y el
 //   resumen de salud financiera) mostraba el mes en minúsculas y sin año,
-//   p. ej. "3 abr". Ver prueba '"Se liquida" muestra el mes con mayúscula...'.
+//   p. ej. "3 abr". Corregido a "3 Abr 2027".
+// - 2026-10-13: dayLabel() (usado en Historial de cuenta, "Próximos 30
+//   días" y agrupadores de Movimientos) tenía el mismo problema al cruzar
+//   de mes: "Domingo 1 de nov" en vez de "Domingo 1 de Nov 2026". También
+//   se agregó el año al encabezado de mes de Calendario (monthName →
+//   monthYear), que nunca lo mostraba. Regla general: toda fecha que
+//   muestre su mes debe llevar mayúscula inicial y año — ver pruebas
+//   "shortDate" y "dayLabel" más abajo.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -148,9 +155,18 @@ function check(name, cond, detail = '') {
     check('icon-action: eliminar movimiento SÍ abre la confirmación', false, 'no hay movimientos de ejemplo para probar');
   }
 
-  // ---------- Formato de fecha corta: mes con mayúscula inicial + año ----------
-  // Programa un pago que liquide por completo la tarjeta de ejemplo, para que
-  // "Se liquida" muestre una fecha real y podamos revisar su formato.
+  // ---------- Formato de fechas: mes con mayúscula inicial + año, SIEMPRE ----------
+  // Regla general del proyecto: cualquier fecha que se muestre con su mes debe
+  // llevar el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027",
+  // "Domingo 1 de Dic 2026"), nunca en minúsculas ni sin año.
+  // Programa un pago, con fecha a dos meses en el futuro, que liquide por
+  // completo la tarjeta de ejemplo — así probamos "Se liquida" (shortDate)
+  // y el renglón del Historial (dayLabel) con una fecha real.
+  const futureDate = (() => {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() + 2, 1);
+    return d.toISOString().slice(0, 10);
+  })();
   await tap('.fab[data-action="new"]');
   await page.waitForTimeout(400);
   await page.selectOption('[name=kind]', 'payment');
@@ -158,11 +174,12 @@ function check(name, cond, detail = '') {
   await page.fill('[name=concept]', 'Pago de prueba automática');
   await page.selectOption('[name=from]', 'bank');
   await page.selectOption('[name=status]', 'pending');
+  await page.fill('[name=date]', futureDate);
   await page.fill('input[aria-label="Importe"]', '10000');
   await page.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
   await tap('#save');
   await page.waitForTimeout(500);
-  check('se puede programar un pago que liquide la tarjeta (preparación de la prueba siguiente)', !(await exists('body.sheet-open')), await text('#error'));
+  check('se puede programar un pago que liquide la tarjeta (preparación de las pruebas siguientes)', !(await exists('body.sheet-open')), await text('#error'));
 
   await tap('.tabbar [data-tab="insights"]');
   await page.waitForTimeout(400);
@@ -177,14 +194,28 @@ function check(name, cond, detail = '') {
     });
     const shortDatePattern = /^\d{1,2} [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ \d{4}$/;
     check(
-      '"Se liquida" muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")',
+      '"Se liquida" (shortDate) muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")',
       !!liquidaText && shortDatePattern.test(liquidaText),
       'valor obtenido: ' + liquidaText
     );
+
+    const historyRowText = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#push-content .list .tx')];
+      const row = rows.find((r) => r.querySelector('.t1')?.textContent.trim() === 'Pago de prueba automática');
+      return row ? row.querySelector('.t2')?.textContent.trim() : null;
+    });
+    const dayLabelPattern = /de [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ \d{4}/;
+    check(
+      'el Historial de la cuenta (dayLabel) muestra el mes con mayúscula inicial y el año (p. ej. "Domingo 1 de Dic 2026")',
+      !!historyRowText && dayLabelPattern.test(historyRowText),
+      'valor obtenido: ' + historyRowText
+    );
+
     await tap('[data-action="pop"]');
     await page.waitForTimeout(300);
   } else {
-    check('"Se liquida" muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")', false, 'no se encontró la tarjeta de crédito de ejemplo');
+    check('"Se liquida" (shortDate) muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")', false, 'no se encontró la tarjeta de crédito de ejemplo');
+    check('el Historial de la cuenta (dayLabel) muestra el mes con mayúscula inicial y el año (p. ej. "Domingo 1 de Dic 2026")', false, 'no se encontró la tarjeta de crédito de ejemplo');
   }
 
   // ---------- Layout responsivo: escritorio (≥1100 ancho, ≥700 alto) ----------

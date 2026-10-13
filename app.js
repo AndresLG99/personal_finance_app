@@ -24,7 +24,7 @@ const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
 const monthName=m=>cap(new Date(m+'-01T12:00:00').toLocaleDateString('es-MX',{month:'long'}));
 const monthYear=m=>cap(new Date(m+'-01T12:00:00').toLocaleDateString('es-MX',{month:'long',year:'numeric'}));
 const shortDate=d=>{const x=new Date(d+'T12:00:00');return x.getDate()+' '+cap(x.toLocaleDateString('es-MX',{month:'short'}).replace('.',''))+' '+x.getFullYear();};
-const dayLabel=d=>{const t=today();if(d===t)return 'Hoy';if(d===addDays(t,-1))return 'Ayer';if(d===addDays(t,1))return 'Mañana';const x=new Date(d+'T12:00:00');return cap(x.toLocaleDateString('es-MX',{weekday:'long'}))+' '+x.getDate()+(d.slice(0,7)!==t.slice(0,7)?' de '+x.toLocaleDateString('es-MX',{month:'short'}).replace('.',''):'');};
+const dayLabel=d=>{const t=today();if(d===t)return 'Hoy';if(d===addDays(t,-1))return 'Ayer';if(d===addDays(t,1))return 'Mañana';const x=new Date(d+'T12:00:00');return cap(x.toLocaleDateString('es-MX',{weekday:'long'}))+' '+x.getDate()+(d.slice(0,7)!==t.slice(0,7)?' de '+cap(x.toLocaleDateString('es-MX',{month:'short'}).replace('.',''))+' '+x.getFullYear():'');};
 const pct=v=>v===null||!isFinite(v)?'—':Math.round(v*100)+'%';
 const monthsTxt=v=>v===null||!isFinite(v)?'—':(v>=10?Math.round(v):v.toFixed(1))+(v>=0.95&&v<1.05?' mes':' meses');
 
@@ -205,7 +205,7 @@ function vCalendario(){
   const dayTx=state.transactions.map((t,index)=>({...t,index})).filter(t=>t.date===sel).sort((a,b)=>a.status===b.status?chronological(a,b):a.status==='done'?-1:1);
   const proj=sel>T;
   return `
-  <div class="head"><div><div class="kicker">Calendario y saldos</div><h1>${monthName(m)}</h1></div>
+  <div class="head"><div><div class="kicker">Calendario y saldos</div><h1>${monthYear(m)}</h1></div>
   <div style="display:flex;gap:8px"><button class="icon-btn" data-action="cal-month" data-d="-1" aria-label="Mes anterior">‹</button><button class="icon-btn" data-action="cal-month" data-d="1" aria-label="Mes siguiente">›</button></div></div>
   <div class="card" style="padding:12px 10px 10px;gap:4px"><div class="cal">${['L','M','M','J','V','S','D'].map(d=>`<span class="wd">${d}</span>`).join('')}${'<span></span>'.repeat(offset)}${Array.from({length:days},(_,i)=>{const d=m+'-'+String(i+1).padStart(2,'0');return `<button data-action="day" data-d="${d}" class="${has.has(d)?'has':''} ${d<T?'past':''} ${d===T?'today':''} ${d===sel?'sel':''}" aria-label="${i+1} de ${monthName(m).toLowerCase()}${has.has(d)?', con movimientos':''}" aria-pressed="${d===sel}"><span>${i+1}</span><span class="d"></span></button>`;}).join('')}</div></div>
   <div class="grid2">
