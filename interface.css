@@ -149,6 +149,7 @@ body.sheet-open .sheet{transform:none}
   .side-foot{margin-top:auto;padding:10px 12px;font-size:11px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
   .wallets{overflow-x:visible;flex-wrap:wrap;margin:0;padding:0}
   .wallet{width:200px}
+  .chips{overflow-x:visible;flex-wrap:wrap;margin:0;padding:0}
   .grid2{gap:16px}
   .card{padding:26px}
   h1{font-size:38px}

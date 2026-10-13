@@ -15,6 +15,11 @@
 //   generaba atributos data-edit/data-duplicate/data-rule-edit en vez de
 //   data-action + data-id, que es lo que escucha el delegador de clics en
 //   app.js. Ver pruebas "icon-action: *".
+// - 2026-10-13: en escritorio, los chips de cuenta en la pestaña Movimientos
+//   se cortaban contra el borde y no había forma de hacer scroll horizontal
+//   (sin barra visible, sin soporte de mouse). .wallets ya tenía el ajuste
+//   de "envolver en vez de hacer scroll" para escritorio pero .chips no lo
+//   tenía. Ver prueba "escritorio ancho: los chips de cuenta envuelven...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -149,6 +154,21 @@ function check(name, cond, detail = '') {
     tabbar: getComputedStyle(document.querySelector('.tabbar')).display,
   }));
   check('escritorio ancho: aparece la barra lateral y se oculta la de pestañas', desktopLayout.sidenav === 'flex' && desktopLayout.tabbar === 'none', JSON.stringify(desktopLayout));
+
+  const chipsDesktop = await page.evaluate(() => {
+    const el = document.querySelector('.chips');
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const viewportW = window.innerWidth;
+    const chips = [...el.querySelectorAll('.chip')];
+    const clipped = chips.some((c) => c.getBoundingClientRect().right > viewportW + 1);
+    return { flexWrap: cs.flexWrap, overflowX: cs.overflowX, chipCount: chips.length, clipped };
+  });
+  check(
+    'escritorio ancho: los chips de cuenta en Movimientos envuelven en vez de cortarse sin forma de hacer scroll',
+    !!chipsDesktop && chipsDesktop.flexWrap === 'wrap' && chipsDesktop.overflowX !== 'auto' && !chipsDesktop.clipped,
+    JSON.stringify(chipsDesktop)
+  );
 
   // ---------- Layout responsivo: celular grande en horizontal NO debe activar escritorio ----------
   await page.setViewportSize({ width: 932, height: 430 });
