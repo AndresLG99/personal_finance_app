@@ -23,7 +23,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
 const monthName=m=>cap(new Date(m+'-01T12:00:00').toLocaleDateString('es-MX',{month:'long'}));
 const monthYear=m=>cap(new Date(m+'-01T12:00:00').toLocaleDateString('es-MX',{month:'long',year:'numeric'}));
-const shortDate=d=>{const x=new Date(d+'T12:00:00');return x.getDate()+' '+x.toLocaleDateString('es-MX',{month:'short'}).replace('.','');};
+const shortDate=d=>{const x=new Date(d+'T12:00:00');return x.getDate()+' '+cap(x.toLocaleDateString('es-MX',{month:'short'}).replace('.',''))+' '+x.getFullYear();};
 const dayLabel=d=>{const t=today();if(d===t)return 'Hoy';if(d===addDays(t,-1))return 'Ayer';if(d===addDays(t,1))return 'Mañana';const x=new Date(d+'T12:00:00');return cap(x.toLocaleDateString('es-MX',{weekday:'long'}))+' '+x.getDate()+(d.slice(0,7)!==t.slice(0,7)?' de '+x.toLocaleDateString('es-MX',{month:'short'}).replace('.',''):'');};
 const pct=v=>v===null||!isFinite(v)?'—':Math.round(v*100)+'%';
 const monthsTxt=v=>v===null||!isFinite(v)?'—':(v>=10?Math.round(v):v.toFixed(1))+(v>=0.95&&v<1.05?' mes':' meses');

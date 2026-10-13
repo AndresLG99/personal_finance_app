@@ -20,6 +20,9 @@
 //   (sin barra visible, sin soporte de mouse). .wallets ya tenía el ajuste
 //   de "envolver en vez de hacer scroll" para escritorio pero .chips no lo
 //   tenía. Ver prueba "escritorio ancho: los chips de cuenta envuelven...".
+// - 2026-10-13: shortDate() (usado en "Se liquida", "Saldo más bajo" y el
+//   resumen de salud financiera) mostraba el mes en minúsculas y sin año,
+//   p. ej. "3 abr". Ver prueba '"Se liquida" muestra el mes con mayúscula...'.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -143,6 +146,45 @@ function check(name, cond, detail = '') {
     await closeSheet();
   } else {
     check('icon-action: eliminar movimiento SÍ abre la confirmación', false, 'no hay movimientos de ejemplo para probar');
+  }
+
+  // ---------- Formato de fecha corta: mes con mayúscula inicial + año ----------
+  // Programa un pago que liquide por completo la tarjeta de ejemplo, para que
+  // "Se liquida" muestre una fecha real y podamos revisar su formato.
+  await tap('.fab[data-action="new"]');
+  await page.waitForTimeout(400);
+  await page.selectOption('[name=kind]', 'payment');
+  await page.waitForTimeout(400);
+  await page.fill('[name=concept]', 'Pago de prueba automática');
+  await page.selectOption('[name=from]', 'bank');
+  await page.selectOption('[name=status]', 'pending');
+  await page.fill('input[aria-label="Importe"]', '10000');
+  await page.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+  await tap('#save');
+  await page.waitForTimeout(500);
+  check('se puede programar un pago que liquide la tarjeta (preparación de la prueba siguiente)', !(await exists('body.sheet-open')), await text('#error'));
+
+  await tap('.tabbar [data-tab="insights"]');
+  await page.waitForTimeout(400);
+  const creditWallet = '.wallet[data-id="credit"]';
+  if (await exists(creditWallet)) {
+    await tap(creditWallet);
+    await page.waitForTimeout(500);
+    const liquidaText = await page.evaluate(() => {
+      const labels = [...document.querySelectorAll('#push-content .card.tight .label')];
+      const label = labels.find((l) => l.textContent.trim() === 'Se liquida');
+      return label ? label.nextElementSibling?.textContent.trim() : null;
+    });
+    const shortDatePattern = /^\d{1,2} [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ \d{4}$/;
+    check(
+      '"Se liquida" muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")',
+      !!liquidaText && shortDatePattern.test(liquidaText),
+      'valor obtenido: ' + liquidaText
+    );
+    await tap('[data-action="pop"]');
+    await page.waitForTimeout(300);
+  } else {
+    check('"Se liquida" muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")', false, 'no se encontró la tarjeta de crédito de ejemplo');
   }
 
   // ---------- Layout responsivo: escritorio (≥1100 ancho, ≥700 alto) ----------
