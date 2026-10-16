@@ -442,7 +442,7 @@ function setTab(id){
   if(id===ui.tab){if(ui.push){pop();return;}const sc=document.querySelector(`[data-screen="${id}"] .scroller`);sc&&sc.scrollTo({top:0,behavior:'smooth'});return;}
   if(ui.push)pop();ui.tab=id;document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.dataset.screen===id));
   document.querySelectorAll('[data-tab]').forEach(b=>{if(b.dataset.tab===id)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  const i=['insights','movimientos','calendario','ajustes','estrategia'].indexOf(id);const pill=$('#tpill');if(pill)pill.style.transform=`translateX(${i*55}px)`;
+  const i=['insights','movimientos','calendario','ajustes','estrategia'].indexOf(id);const pill=$('#tpill');if(pill)pill.style.transform=`translateX(${i*69}px)`;
   const mini=$('#mini-icon');if(mini)mini.innerHTML=`<path d="${svgI[id]}"/>`;setCompact(false);render(id,true);
 }
 function setCompact(v){ui.compact=v;document.body.classList.toggle('compact',v);}
