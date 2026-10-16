@@ -38,6 +38,17 @@
 //   vales, Deudas = tarjetas de crédito/deudas por pagar, Por cobrar =
 //   préstamos por cobrar) y se usó en las tres secciones. Ver pruebas
 //   "separa las tarjetas en divisiones Líquido / Deudas / Por cobrar".
+// - 2026-10-15: en una laptop real se veía la versión móvil en vez de la de
+//   escritorio. interface.css activaba el layout de escritorio con
+//   "min-width:860px and min-height:700px", y muchas laptops con escalado
+//   de Windows (125%/150%) o con la barra de marcadores visible terminan
+//   con menos de 700px de alto disponible aunque sean una laptop normal.
+//   Se cambió la condición de alto por tipo de puntero: "hover:hover and
+//   pointer:fine" (mouse/trackpad) en vez de min-height, que distingue
+//   laptop de celular/tablet táctil sin depender de cuánto mida la
+//   ventana. Ver pruebas "laptop ancha con poca altura..." (debe verse
+//   escritorio) y "celular en horizontal...pantalla táctil" (debe seguir
+//   viéndose móvil, ahora emulando una pantalla táctil de verdad).
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -275,7 +286,7 @@ function check(name, cond, detail = '') {
     await groupsIn('#s-ajustes')
   );
 
-  // ---------- Layout responsivo: escritorio (≥1100 ancho, ≥700 alto) ----------
+  // ---------- Layout responsivo: escritorio ancho y alto (mouse/trackpad) ----------
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
@@ -300,15 +311,43 @@ function check(name, cond, detail = '') {
     JSON.stringify(chipsDesktop)
   );
 
-  // ---------- Layout responsivo: celular grande en horizontal NO debe activar escritorio ----------
-  await page.setViewportSize({ width: 932, height: 430 });
+  // ---------- Regresión: laptop con poca altura de ventana SÍ debe activar escritorio ----------
+  // Reportado: en una laptop real (ventana ancha, mouse/trackpad) se veía la versión
+  // móvil. Causa: el layout de escritorio exigía además min-height:700px, y muchas
+  // laptops con escalado de Windows (125%/150%) o con barra de marcadores visible
+  // terminan con menos de 700px de alto disponible aunque sean una laptop normal.
+  // El layout de escritorio ahora se activa por ancho + tipo de puntero (mouse/
+  // trackpad = hover:hover y pointer:fine), no por el alto de la ventana — esta
+  // prueba usa un viewport ancho pero bajo (como esa laptop) sin emular pantalla
+  // táctil, y debe mostrar la versión de escritorio de todas formas.
+  await page.setViewportSize({ width: 1200, height: 560 });
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
-  const landscapeLayout = await page.evaluate(() => ({
+  const shortLaptopLayout = await page.evaluate(() => ({
     sidenav: getComputedStyle(document.querySelector('.sidenav')).display,
     tabbar: getComputedStyle(document.querySelector('.tabbar')).display,
   }));
-  check('celular en horizontal (932×430): se mantiene en modo móvil', landscapeLayout.sidenav === 'none' && landscapeLayout.tabbar === 'flex', JSON.stringify(landscapeLayout));
+  check(
+    'laptop ancha con poca altura (1200×560, con mouse/trackpad): SÍ muestra la versión de escritorio',
+    shortLaptopLayout.sidenav === 'flex' && shortLaptopLayout.tabbar === 'none',
+    JSON.stringify(shortLaptopLayout)
+  );
+
+  // ---------- Layout responsivo: celular grande en horizontal (pantalla táctil) NO debe activar escritorio ----------
+  // Ahora que escritorio se decide por tipo de puntero y no por alto de ventana, esta
+  // prueba necesita emular de verdad una pantalla táctil (hasTouch+isMobile) — si no,
+  // Chromium reporta pointer:fine por defecto (como una laptop) y la comparación ya
+  // no estaría probando un celular real.
+  const phoneContext = await browser.newContext({ viewport: { width: 932, height: 430 }, hasTouch: true, isMobile: true });
+  const phonePage = await phoneContext.newPage();
+  await phonePage.goto(BASE, { waitUntil: 'networkidle' });
+  await phonePage.waitForTimeout(700);
+  const landscapeLayout = await phonePage.evaluate(() => ({
+    sidenav: getComputedStyle(document.querySelector('.sidenav')).display,
+    tabbar: getComputedStyle(document.querySelector('.tabbar')).display,
+  }));
+  check('celular en horizontal (932×430, pantalla táctil): se mantiene en modo móvil', landscapeLayout.sidenav === 'none' && landscapeLayout.tabbar === 'flex', JSON.stringify(landscapeLayout));
+  await phoneContext.close();
 
   await browser.close();
 

@@ -128,8 +128,14 @@ body.sheet-open .sheet{transform:none}
 .empty{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
 .sidenav{display:none}
 
-/* ---------- Escritorio: barra lateral fija, panel de detalle como cajón, hoja como diálogo centrado ---------- */
-@media(min-width:860px) and (min-height:700px){
+/* ---------- Escritorio: barra lateral fija, panel de detalle como cajón, hoja como diálogo centrado ----------
+   Se activa por ancho + tipo de puntero (mouse/trackpad = hover:hover y pointer:fine),
+   NO por alto de ventana: muchas laptops con escalado de Windows (125%/150%) o con
+   la barra de marcadores/pestañas visible terminan con menos de 700px de alto real
+   aunque sean una laptop de escritorio normal, y antes eso hacía que se mostrara la
+   versión móvil por error. pointer/hover distingue mouse de pantalla táctil sin
+   depender de cuánto mida la ventana. */
+@media(min-width:860px) and (hover:hover) and (pointer:fine){
   body{overflow:auto}
   .app{height:100vh;max-width:none;margin:0;overflow:visible;background:var(--bg)}
   .stage{position:fixed;left:240px;right:0;top:0;bottom:0;border-radius:0}
@@ -167,10 +173,10 @@ body.sheet-open .sheet{transform:none}
   .sheet-body{padding:8px 26px 26px}
   .welcome[open]{right:40px;bottom:28px}
 }
-@media(min-width:1100px) and (min-height:700px){
+@media(min-width:1100px) and (hover:hover) and (pointer:fine){
   .row2{display:grid;grid-template-columns:3fr 2fr;gap:16px;align-items:start}
   .row2.even{grid-template-columns:1fr 1fr}
 }
 @media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;transition-delay:0s!important}}
 @media(min-width:441px) and (max-width:859px){.app{border-left:1px solid #FFFFFF10;border-right:1px solid #FFFFFF10}}
-@media(min-width:860px) and (max-width:1099px) and (min-height:700px){.content{padding:32px 28px 64px}}
+@media(min-width:860px) and (max-width:1099px) and (hover:hover) and (pointer:fine){.content{padding:32px 28px 64px}}
