@@ -1,4 +1,4 @@
-import {paymentCandidates,allocateExpense} from './payment-allocation.js?v=20260924-1';
+import {paymentCandidates,allocateExpense,autoPaymentWindow,defaultPaymentSource,createAutoPayment} from './payment-allocation.js?v=20260924-1';
 import {walletTheme,walletColors,merchantIcon} from './wallet.js?v=20260922-1';
 import {activityLists,chronological,stampTransactions} from './activity.js?v=20260917-1';
 import {needsWelcome,openWelcome} from './onboarding.js?v=20260924-1';
@@ -11,18 +11,13 @@ import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260922-1';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
 
-import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories} from './finance.js?v=20260922-1';
+import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow} from './finance.js?v=20260922-1';
 
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),uid=()=>crypto.randomUUID(),money=(n,c='MXN',tone)=>`<span class="${tone||(n<0?'negative':n>0?'positive':'neutral')}">${new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100)}</span>`;
 const fmt=(n,c='MXN')=>new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100);
 const fmt0=(n,c='MXN')=>new Intl.NumberFormat('es-MX',{style:'currency',currency:c,maximumFractionDigits:0}).format((n||0)/100);
 const signed=(n,c)=>(n>0?'+':n<0?'−':'')+fmt(Math.abs(n),c);
 const signed0=(n,c)=>(n>0?'+':n<0?'−':'')+fmt0(Math.abs(n),c);
-const addDays=(date,n)=>{const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
-// Fecha de corte/pago de una tarjeta: si el día programado cae en sábado o
-// domingo, se recorre al viernes inmediato anterior (regla de tarjetas de
-// crédito). No se usa para fechas recurrentes genéricas, solo para corte/pago.
-const cardDate=(date,offset,day)=>{const d=monthDate(date,offset,day);const w=new Date(d+'T12:00:00Z').getUTCDay();return w===0?addDays(d,-2):w===6?addDays(d,-1):d;};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
 const monthName=m=>cap(new Date(m+'-01T12:00:00').toLocaleDateString('es-MX',{month:'long'}));
@@ -34,7 +29,7 @@ const monthsTxt=v=>v===null||!isFinite(v)?'—':(v>=10?Math.round(v):v.toFixed(1
 
 let client,user,revision=0,busy=false,channel,connectionText='',loginText='Iniciar sesión';
 
-const empty=()=>({accounts:[],transactions:[],rules:[]});
+const empty=()=>({accounts:[],transactions:[],rules:[],goals:[]});
 
 const sample=()=>({accounts:[{id:'bank',name:'Cuenta principal · ejemplo',type:'debit',currency:'MXN',opening:2400000,asOf:today(),available:true},{id:'cash',name:'Efectivo · ejemplo',type:'cash',currency:'MXN',opening:120000,asOf:today(),available:true},{id:'credit',name:'Tarjeta · ejemplo',type:'credit',currency:'MXN',opening:-450000,asOf:today(),limit:3000000,cut:2,pay:22}],transactions:[{id:'example',kind:'expense',concept:'Supermercado · ejemplo',date:today(),from:'bank',amount:84500,status:'done'},{id:'payment',kind:'payment',concept:'Pago de tarjeta · ejemplo',date:monthDate(today(),1,22),from:'bank',to:'credit',amount:150000,status:'pending'}],rules:[]});
 
@@ -44,7 +39,7 @@ const account=id=>state.accounts.find(a=>a.id===id);const name=id=>account(id)?.
 const active=()=>state.accounts.filter(a=>!a.archived);
 const txCur=t=>account(t.from||t.to)?.currency||ui.currency;
 
-const ui={tab:'insights',currency:'MXN',month:today().slice(0,7),calMonth:today().slice(0,7),selDay:today(),seg:'done',acct:'all',q:'',push:null,scroll:{},compact:false};
+const ui={tab:'insights',currency:'MXN',month:today().slice(0,7),calMonth:today().slice(0,7),selDay:today(),seg:'done',acct:'all',q:'',push:null,scroll:{},compact:false,strategySeg:'recomendaciones',priority:'snowball'};
 const currencies=()=>{const s=[...new Set(active().map(a=>a.currency))];return s.length?s:['MXN'];};
 function ensureCurrency(){if(!currencies().includes(ui.currency))ui.currency=currencies()[0];}
 
@@ -117,7 +112,7 @@ function lineChart(series,todayStr,w=326,h=96){
   const tx=x(pastEnd),tyv=y(series[pastEnd].v);
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Saldo diario del mes; la línea punteada es la proyección">${past?`<path d="${past}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`:''}${ti<series.length?`<path d="${fut}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="5 7" stroke-linecap="round" opacity=".7" vector-effect="non-scaling-stroke"/>`:''}${ti>0&&ti<=series.length?`<line x1="${tx}" y1="2" x2="${tx}" y2="${h-2}" stroke="#FFFFFF24" vector-effect="non-scaling-stroke"/><circle cx="${tx}" cy="${tyv}" r="5" fill="var(--bg)" stroke="var(--accent)" stroke-width="3" vector-effect="non-scaling-stroke"/>`:''}</svg>`;
 }
-const svgI={insights:'M3 17l5-5 4 3 8-10M15 5h5v5',movimientos:'M8 3l-4 4 4 4M4 7h16M16 13l4 4-4 4M20 17H4',calendario:'M7 3v4M17 3v4M3 11h18M7 5h10a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4z',ajustes:'M4 7h16M4 17h16M9 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM15 14.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z'};
+const svgI={insights:'M3 17l5-5 4 3 8-10M15 5h5v5',movimientos:'M8 3l-4 4 4 4M4 7h16M16 13l4 4-4 4M20 17H4',calendario:'M7 3v4M17 3v4M3 11h18M7 5h10a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4z',ajustes:'M4 7h16M4 17h16M9 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM15 14.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',estrategia:'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 12m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0M12 3v3M12 18v3M3 12h3M18 12h3'};
 
 function txIcon(t){if(t.kind==='income'||t.kind==='transfer'||t.kind==='payment')return merchantIcon(t);return merchantIcon(t);}
 function txAmount(t){const c=txCur(t);if(t.kind==='income')return `<span class="amt num pos">+${fmt(t.received??t.amount,c)}</span>`;if(t.kind==='transfer'||t.kind==='payment')return `<span class="amt num neutral">${fmt(t.amount,c)}</span>`;return `<span class="amt num neg">−${fmt(t.amount,c)}</span>`;}
@@ -142,7 +137,7 @@ function vInsights(){
   const overdue=state.transactions.filter(t=>t.status==='pending'&&t.date<T).length;
   const tiles=[defs[0],defs[1],defs[2]];
   const proximosHtml=`<div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h2>Próximos 30 días</h2><span class="small">${next.length} programados</span></div>
-    ${next.length?`<div class="list">${next.slice(0,5).map(t=>`<div class="tx" style="gap:12px"><span style="width:44px;display:flex;flex-direction:column;align-items:center;flex-shrink:0"><span style="font-size:12px;font-weight:700;color:#FFB18A">${new Date(t.date+'T12:00:00').toLocaleDateString('es-MX',{month:'short'}).replace('.','').toUpperCase()}</span><span style="font-size:20px;font-weight:700;line-height:1.1">${Number(t.date.slice(8))}</span></span><button data-action="edit" data-id="${esc(t.id)}" style="display:flex;flex-direction:column;flex:1;min-width:0;text-align:left;min-height:44px;justify-content:center"><span class="t1">${esc(t.concept)}</span><span class="t2">${txSub(t)}</span></button><button class="btn sm" data-action="confirm" data-id="${esc(t.id)}" style="padding:0 14px">Confirmar</button></div>`).join('')}</div>${next.length>5?`<button class="link" data-action="pending-view" style="align-self:center">Ver los ${next.length} programados</button>`:''}`:'<div class="list"><p class="empty">Nada programado en los próximos 30 días.</p></div>'}
+    ${next.length?`<div class="list" id="proximos-list">${next.slice(0,5).map(t=>`<div class="tx" style="gap:12px"><span style="width:44px;display:flex;flex-direction:column;align-items:center;flex-shrink:0"><span style="font-size:12px;font-weight:700;color:#FFB18A">${new Date(t.date+'T12:00:00').toLocaleDateString('es-MX',{month:'short'}).replace('.','').toUpperCase()}</span><span style="font-size:20px;font-weight:700;line-height:1.1">${Number(t.date.slice(8))}</span></span><button data-action="edit" data-id="${esc(t.id)}" class="mid-col" style="display:flex;flex-direction:column;flex:1;min-width:0;text-align:left;min-height:44px;justify-content:center"><span class="t1">${esc(t.concept)}</span><span class="t2">${txSub(t)}</span></button><button class="btn sm" data-action="confirm" data-id="${esc(t.id)}" style="padding:0 14px">Confirmar</button>${transactionActions(t,esc,{edit:false})}</div>`).join('')}</div>${next.length>5?`<button class="link" data-action="pending-view" style="align-self:center">Ver los ${next.length} programados</button>`:''}`:'<div class="list"><p class="empty">Nada programado en los próximos 30 días.</p></div>'}
   </div>`;
   const hoyHtml=todayTx.length?`<div style="display:flex;flex-direction:column;gap:8px"><h2 style="padding:0 4px">Hoy</h2><div class="list">${todayTx.map(txRow).join('')}</div></div>`:'';
   return `
@@ -169,7 +164,7 @@ function vInsights(){
     <div style="display:flex;flex-direction:column;gap:12px">${catRows.map((c,i)=>`<div style="display:flex;align-items:center;gap:12px"><span class="dot" style="background:${colors[i]}"></span><span style="font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c[0])}</span><span class="small">${Math.round(c[1]/totalCat*100)}%</span><span class="num" style="font-size:16px;font-weight:600;min-width:80px;text-align:right">${fmt0(c[1],cur)}</span></div>`).join('')}</div>`:'<p class="empty">Aún no hay gastos este mes.</p>'}
   </div>
   </div>
-  ${overdue?`<div class="banner" style="border-color:#FFCF6A55;background:#241C10"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><button class="btn sm" data-action="pending-view">Revisar</button></div>`:''}
+  ${overdue?`<button type="button" class="banner" data-action="overdue" style="border-color:#FFCF6A55;background:#241C10;width:100%;text-align:left;cursor:pointer"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><span class="btn sm" aria-hidden="true">Revisar</span></button>`:''}
   ${hoyHtml?`<div class="row2 even">${proximosHtml}${hoyHtml}</div>`:proximosHtml}
   <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(active(),a=>walletCard(a))}</div>`;
 }
@@ -235,6 +230,83 @@ function vAjustes(){
   <button class="btn ghost" data-action="export">Exportar respaldo JSON</button>`;
 }
 
+/* ========================================================================
+   Estrategia: panorama con 3 formas de decidir hacia dónde mandar el dinero
+   (recomendaciones, metas y un simulador de pagos extra), elegibles por el
+   usuario desde un segmentador.
+   ======================================================================== */
+function debtAccounts(cur){return active().filter(a=>a.currency===cur&&debt(a)).map(a=>({a,p:payoff(state,a.id)})).filter(x=>x.p&&x.p.outstanding>0);}
+function strategyOrder(list,mode){
+  const sorted=[...list];
+  if(mode==='avalanche')sorted.sort((x,y)=>(y.a.limit?y.p.outstanding/y.a.limit:0)-(x.a.limit?x.p.outstanding/x.a.limit:0));
+  else sorted.sort((x,y)=>x.p.outstanding-y.p.outstanding);
+  return sorted;
+}
+function vRecomendaciones(){
+  const cur=ui.currency,h=health(cur),defs=indicatorDefs(h,cur);
+  const weakest=defs.filter(d=>d.s).sort((a,b)=>h.pts[a.k](h.I[a.k])-h.pts[b.k](h.I[b.k]))[0];
+  const list=strategyOrder(debtAccounts(cur),ui.priority);
+  return `
+  <div class="card"><h2>Lo más urgente</h2>${weakest?`<p class="subtle">Tu indicador más débil es <strong>${esc(weakest.name)}</strong> (${weakest.value}, ${esc(weakest.goal).toLowerCase()}). ${esc(weakest.desc)}</p>`:'<p class="subtle">Registra más movimientos realizados para calcular tu salud financiera y recibir recomendaciones.</p>'}</div>
+  <div class="card"><h2>Orden para pagar tus deudas</h2>
+  <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><span class="thumb" style="width:calc(50% - 3px);transform:translateX(${ui.priority==='avalanche'?100:0}%)"></span><button data-action="priority" data-v="snowball" aria-pressed="${ui.priority==='snowball'}">Bola de nieve</button><button data-action="priority" data-v="avalanche" aria-pressed="${ui.priority==='avalanche'}">Avalancha</button></div>
+  <p class="subtle">${ui.priority==='snowball'?'Primero la deuda con el saldo más pequeño: liquidarla rápido te da impulso.':'Primero la tarjeta con mayor porcentaje usado de su límite.'}</p>
+  ${list.length?`<div class="list">${list.map((x,i)=>`<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px;font-weight:600">${i+1}. ${esc(x.a.name)}</span><span class="small">${x.a.limit?'Uso: '+pct(x.p.outstanding/x.a.limit)+' · ':''}${x.p.date?'Se liquida: '+shortDate(x.p.date):'Sin fecha programada'}</span></span><span class="v num" style="font-weight:600">${fmt0(x.p.outstanding,x.a.currency)}</span></div>`).join('')}</div>`:'<p class="empty">No tienes deudas pendientes en esta moneda.</p>'}
+  </div>
+  ${list.length?`<p class="subtle">Sugerencia: destina cualquier dinero extra de este mes primero a <strong>${esc(list[0].a.name)}</strong>. Cuando la liquides, suma lo que le pagabas al siguiente de la lista.</p>`:''}`;
+}
+function goalsList(){return state.goals||[];}
+function goalProgress(g){
+  const a=account(g.accountId);
+  if(g.kind==='save'){const bal=a?Math.max(0,balance(state,a.id,today())):0;return {current:bal,ratio:g.target?clamp(bal/g.target,0,1):0};}
+  const p=a?payoff(state,a.id):null,outstanding=p?p.outstanding:0,base=g.baseline||outstanding;
+  const paid=Math.max(0,base-outstanding);return {current:outstanding,ratio:base?clamp(paid/base,0,1):(outstanding===0?1:0)};
+}
+function vMetas(){
+  const list=goalsList();
+  return `<div class="row-between" style="padding:0 4px"><h2>Tus metas</h2><button class="link" data-action="add-goal">＋ Agregar</button></div>
+  ${list.length?list.map(g=>{const pr=goalProgress(g),a=account(g.accountId),cur=a?.currency||'MXN';return `<div class="card tight" style="gap:10px"><div class="row-between"><span style="font-size:16px;font-weight:600">${esc(g.name)}</span><span style="display:flex;gap:4px">${iconButton('edit','goal-edit',g.id,'Editar '+g.name,esc)}${iconButton('delete','goal-delete',g.id,'Eliminar '+g.name,esc)}</span></div><div style="height:8px;border-radius:4px;background:#2A2B34;overflow:hidden"><div style="height:100%;width:${Math.round(pr.ratio*100)}%;background:${pr.ratio>=1?'var(--pos)':'var(--accent)'}"></div></div><span class="small">${g.kind==='save'?`${fmt0(pr.current,cur)} de ${fmt0(g.target,cur)} · ${Math.round(pr.ratio*100)}%`:`Debes ${fmt0(pr.current,cur)} · ${Math.round(pr.ratio*100)}% pagado`}${g.targetDate?' · meta: '+shortDate(g.targetDate):''}</span></div>`;}).join(''):'<p class="empty">Crea una meta de ahorro o de pago de deuda para seguir tu avance.</p>'}`;
+}
+function vSimulador(){
+  const cur=ui.currency,debts=debtAccounts(cur);
+  if(!debts.length)return '<div class="card"><h2>¿Qué pasa si pago más?</h2><p class="subtle">No tienes deudas pendientes en esta moneda para simular un abono extra.</p></div>';
+  return `<div class="card"><h2>¿Qué pasa si pago más?</h2><p class="subtle">Agrega un monto extra a una tarjeta o deuda y mira el efecto inmediato en el saldo. Esta app no registra tasas de interés, así que el cálculo es solo el efecto directo del abono, sin estimar intereses.</p>
+  <div class="fields" style="margin-top:4px">${select('sim-account','Cuenta',Object.fromEntries(debts.map(x=>[x.a.id,x.a.name])),debts[0].a.id)}${input('sim-extra','Abono extra',0,'number','min="0" step="0.01"')}</div>
+  <div id="sim-result" class="card tight" style="margin-top:10px"></div></div>`;
+}
+function wireEstrategia(){
+  const sel=$('#s-estrategia [name=sim-account]'),inp=$('#s-estrategia [name=sim-extra]'),out=$('#sim-result');
+  if(!sel||!inp||!out)return;
+  const update=()=>{
+    const a=account(sel.value),p=a?payoff(state,a.id):null;if(!a||!p){out.innerHTML='';return;}
+    const extra=Math.round((Number(inp.value)||0)*100),newOutstanding=Math.max(0,p.outstanding-extra);
+    out.innerHTML=`<span class="label">Saldo actual</span><span class="mid num">${fmt0(p.outstanding,a.currency)}</span><span class="label" style="margin-top:8px">Saldo si abonas ${fmt0(extra,a.currency)} extra</span><span class="mid num" style="color:${extra?'var(--pos)':'inherit'}">${fmt0(newOutstanding,a.currency)}</span>${a.limit?`<span class="small">Crédito disponible: de ${fmt0(a.limit-p.outstanding,a.currency)} a ${fmt0(a.limit-newOutstanding,a.currency)}</span>`:''}`;
+  };
+  sel.onchange=update;inp.oninput=update;update();
+}
+function vEstrategia(){
+  const segs=[['recomendaciones','Recomendaciones'],['metas','Metas'],['simulador','Simulador']];
+  const idx=Math.max(0,segs.findIndex(([k])=>k===ui.strategySeg));
+  const body=ui.strategySeg==='metas'?vMetas():ui.strategySeg==='simulador'?vSimulador():vRecomendaciones();
+  return `<div class="head"><div><div class="kicker">Hacia dónde mandar tu dinero</div><h1>Estrategia</h1></div></div>
+  <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))"><span class="thumb" style="width:calc(33.333% - 2px);transform:translateX(${idx*100}%)"></span>${segs.map(([k,l])=>`<button data-action="strategy-seg" data-v="${k}" aria-pressed="${ui.strategySeg===k}" style="font-size:13px">${l}</button>`).join('')}</div>
+  <div id="estrategia-body" style="display:flex;flex-direction:column;gap:14px">${body}</div>`;
+}
+function goalForm(existing){
+  if(!state.accounts.length){accountForm();return;}
+  const g=existing||{},kind=g.kind||'save';
+  modal(g.id?'Editar meta':'Nueva meta',input('name','Nombre de la meta',g.name||'','text','required maxlength="80"')+select('kind','Tipo',{save:'Ahorrar un monto',payoff:'Liquidar una deuda'},kind)+select('accountId',kind==='save'?'Cuenta donde ahorras':'Deuda a liquidar',opts(a=>kind==='save'?!debt(a):debt(a)),g.accountId)+(kind==='save'?input('target','Monto meta',g.target?g.target/100:'','number','required min="0.01" step="0.01"'):'<p class="subtle">El avance se calcula desde el saldo que debes hoy hasta $0.</p>')+input('targetDate','Fecha meta (opcional)',g.targetDate||'','date',''),async f=>{
+    const next=structuredClone(state);next.goals??=[];
+    const a=account(f.accountId);if(!a)throw Error('Selecciona una cuenta válida.');
+    const item={id:g.id||uid(),name:f.name,kind:f.kind,accountId:f.accountId,targetDate:f.targetDate||null};
+    if(f.kind==='save'){item.target=cents(f.target);}else{const p=payoff(state,f.accountId);item.baseline=(g.kind==='payoff'&&g.accountId===f.accountId&&g.baseline)||(p?p.outstanding:0);}
+    if(g.id)next.goals=next.goals.map(x=>x.id===g.id?item:x);else next.goals.push(item);
+    await persist(next);
+  });
+  const kSel=$('[name=kind]');kSel.onchange=()=>{const draft=Object.fromEntries(new FormData($('#form')));goalForm({...g,kind:draft.kind,name:draft.name});};
+}
+function deleteGoalForm(g){if(!g)return;modal('Eliminar meta',`<p>Vas a eliminar la meta <strong>${esc(g.name)}</strong>.</p>`,async()=>{const next=structuredClone(state);next.goals=(next.goals||[]).filter(x=>x.id!==g.id);await persist(next);});}
+
 function vSalud(){
   const cur=ui.currency,T=today(),h=health(cur),defs=indicatorDefs(h,cur);
   const refs=[];for(let i=5;i>=1;i--)refs.push(monthDate(T,-i,31));refs.push(T);
@@ -266,7 +338,7 @@ function vAccount(id){
   const days=Array.from({length:31},(_,i)=>{const d=addDays(T,i);return {d,v:d<a.asOf?null:balance(state,id,d,true)};}).filter(x=>x.v!==null);
   const po=isDebt?payoff(state,id):null;
   const events=[];for(let off=0;off<=1;off++){if(a.type==='credit'&&a.cut)events.push({d:cardDate(T,off,a.cut),l:'Fecha de corte'});if(isDebt&&a.pay)events.push({d:cardDate(T,off,a.pay),l:'Fecha de pago'});}
-  for(const t of state.transactions)if(t.status==='pending'&&(t.from===id||t.to===id)&&t.date>=T&&t.date<=addDays(T,30))events.push({d:t.date,l:t.concept,amt:(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0)});
+  for(const t of state.transactions)if(t.status==='pending'&&(t.from===id||t.to===id)&&t.date>=T&&t.date<=addDays(T,30))events.push({d:t.date,l:t.concept,amt:(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0),id:t.id});
   events.sort((x,y)=>x.d.localeCompare(y.d));const evs=events.filter(e=>e.d>=T&&e.d<=addDays(T,30)).slice(0,6);
   let chart='';if(days.length>1)chart=lineChart(days.map(x=>({d:x.d,v:x.v})),addDays(T,-1),326,110)+`<div class="axis"><span>Hoy</span><span>+30 d</span></div>`;
   const hist=accountHistory(state,id).filter(t=>t.actual!==null).reverse();
@@ -276,8 +348,8 @@ function vAccount(id){
     ${isDebt?`<div class="card tight"><span class="label">Crédito disponible</span><span class="mid num">${a.limit?fmt0(a.limit+v,a.currency):'—'}</span><span class="small">${a.limit?'de '+fmt0(a.limit,a.currency):'sin límite registrado'}</span></div><div class="card tight"><span class="label">Se liquida</span><span class="mid">${po&&po.date?shortDate(po.date):po&&po.outstanding===0?'Al corriente':'Sin fecha'}</span><span class="small">${po&&po.date?'con los pagos programados':'faltan pagos por programar'}</span></div>`:`<div class="card tight"><span class="label">En 30 días</span><span class="mid num">${fmt0(vp,a.currency)}</span><span class="small">proyectado</span></div><div class="card tight"><span class="label">Cambio</span><span class="mid num ${vp-v>=0?'pos':'neg'}">${signed0(vp-v,a.currency)}</span><span class="small">por programados</span></div>`}
   </div>
   ${isDebt&&(a.cut||a.pay)?`<div class="card tight" style="flex-direction:row;justify-content:space-around;text-align:center"><span><span class="label" style="display:block">Corte</span><span class="mid">día ${a.cut||'—'}</span></span><span><span class="label" style="display:block">Pago</span><span class="mid">día ${a.pay||'—'}</span></span></div>`:''}
-  <div class="card"><h2>Próximos 30 días</h2>${chart||'<p class="empty">Sin saldo inicial en este periodo.</p>'}${evs.length?`<div style="display:flex;flex-direction:column">${evs.map(e=>`<div class="settings-row" style="min-height:48px"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.l)}</span><span class="small">${dayLabel(e.d)}</span></span>${e.amt!==undefined?`<span class="num" style="font-size:15px;font-weight:600;color:${e.amt>=0?'var(--pos)':'var(--text)'}">${signed(e.amt,a.currency)}</span>`:''}</div>`).join('')}</div>`:''}</div>
-  <div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h2>Historial</h2><span class="small">saldo tras cada movimiento</span></div><div class="list">${hist.length?hist.map(t=>`<button class="tx" data-action="edit" data-id="${esc(t.id)}">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}${t.status==='pending'?' · programado':''}</span></span><span style="display:flex;flex-direction:column;align-items:flex-end"><span class="amt num ${t.change>=0?'pos':'neg'}">${signed(t.change,a.currency)}</span><span class="small num">${fmt(t.status==='done'?t.actual:t.projected,a.currency)}</span></span></button>`).join(''):'<p class="empty">Sin movimientos todavía.</p>'}</div></div>
+  <div class="card"><h2>Próximos 30 días</h2>${chart||'<p class="empty">Sin saldo inicial en este periodo.</p>'}${evs.length?`<div style="display:flex;flex-direction:column">${evs.map(e=>`<div class="settings-row" style="min-height:48px">${e.id?`<button type="button" class="mid-col" style="display:flex;flex-direction:column;min-width:0;text-align:left" data-action="edit" data-id="${esc(e.id)}">`:'<span style="display:flex;flex-direction:column;min-width:0">'}<span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.l)}</span><span class="small">${dayLabel(e.d)}</span>${e.id?'</button>':'</span>'}${e.amt!==undefined?`<span class="num" style="font-size:15px;font-weight:600;color:${e.amt>=0?'var(--pos)':'var(--text)'}">${signed(e.amt,a.currency)}</span>`:''}${e.id?transactionActions({id:e.id,concept:e.l},esc,{edit:false}):''}</div>`).join('')}</div>`:''}</div>
+  <div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h2>Historial</h2><span class="small">saldo tras cada movimiento</span></div><div class="list">${hist.length?hist.map(t=>`<div class="tx" style="padding-right:0"><button class="tx" style="padding:0;border:0;flex:1;min-width:0" data-action="edit" data-id="${esc(t.id)}">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}${t.status==='pending'?' · programado':''}</span></span><span style="display:flex;flex-direction:column;align-items:flex-end"><span class="amt num ${t.change>=0?'pos':'neg'}">${signed(t.change,a.currency)}</span><span class="small num">${fmt(t.status==='done'?t.actual:t.projected,a.currency)}</span></span></button>${transactionActions(t,esc,{edit:false})}</div>`).join(''):'<p class="empty">Sin movimientos todavía.</p>'}</div></div>
   <button class="btn ghost" data-action="account-edit" data-id="${esc(a.id)}">Editar cuenta</button>`;
 }
 
@@ -302,12 +374,34 @@ function transactionForm(t={},confirming=false){if(!state.accounts.length){accou
 
 function allocationForm(expenseId){
  const expense=state.transactions.find(t=>t.id===expenseId);if(!expense)return;
- const a=account(expense.from),candidates=paymentCandidates(state,expense);
+ const a=account(expense.from),candidates=paymentCandidates(state,expense),auto=autoPaymentWindow(state,expense);
  const format=n=>new Intl.NumberFormat('es-MX',{style:'currency',currency:a.currency}).format(n/100);
- const multi=candidates.length>1;
- modal('Asignar gasto a un pago',`<p>El gasto <strong>${esc(expense.concept)}</strong> por ${money(-expense.amount,a.currency)} ya está guardado.</p>`+(candidates.length?(multi?select('mode','Cómo asignarlo',{auto:'Sumar automáticamente al pago más próximo',choose:'Elegir el pago'},'auto'):'')+`<div id="alloc-choice"${multi?' hidden':''}><p>Elige el pago de ${esc(a.name)} al que quieres sumarlo. Solo cambiará este pago.</p>`+select('payment','Pago programado',Object.fromEntries(candidates.map(t=>[t.id,`${t.date} · ${t.concept} · ${format(t.received??t.amount)} → ${format((t.received??t.amount)+expense.amount)}`])),candidates[0].id)+`</div><p class="subtle">En otra moneda se conserva el importe destino y se estima el origen con la tasa del pago. Si después editas o eliminas el gasto, revisa también el pago asignado.</p>`:'<p>No hay pagos pendientes con fecha de hoy o posterior y posteriores o iguales al gasto. Crea uno desde + → Pago de deuda / tarjeta. El gasto se conservará aunque cierres este aviso.</p>'),async f=>{if(!candidates.length)return;const paymentId=multi&&f.mode==='auto'?candidates[0].id:f.payment;await persist(allocateExpense(state,expenseId,paymentId));notify('Gasto sumado al pago seleccionado.');});
- $('#save').textContent=candidates.length?'Sumar al pago':'Entendido';
- if(multi){const modeSel=$('[name=mode]'),box=$('#alloc-choice');modeSel.onchange=()=>{box.hidden=modeSel.value!=='choose';};}
+ const autoCreates=!!(auto&&!auto.candidate);
+ const showMode=candidates.length>1||(autoCreates&&candidates.length>0);
+ const needsSource=autoCreates&&!defaultPaymentSource(state,a.id);
+ const autoLabel=!auto?'Sumar automáticamente al pago más próximo':auto.candidate?`Sumar automáticamente al pago del ${auto.candidate.date} (periodo de corte hasta el ${auto.cutEnd})`:`Crear un pago nuevo el ${auto.payDate} (periodo de corte hasta el ${auto.cutEnd})`;
+ const canAllocate=candidates.length>0||autoCreates;
+ modal('Asignar gasto a un pago',`<p>El gasto <strong>${esc(expense.concept)}</strong> por ${money(-expense.amount,a.currency)} ya está guardado.</p>`+(canAllocate?(showMode?select('mode','Cómo asignarlo',{auto:autoLabel,choose:'Elegir el pago'},'auto'):'')+(needsSource?`<div id="alloc-source"><p>No hay un pago registrado antes para esta tarjeta: elige desde qué cuenta se pagará.</p>`+select('source','Cuenta de origen',opts(x=>!debt(x)&&x.currency===a.currency))+`</div>`:'')+(candidates.length?`<div id="alloc-choice"${showMode?' hidden':''}><p>Elige el pago de ${esc(a.name)} al que quieres sumarlo. Solo cambiará este pago.</p>`+select('payment','Pago programado',Object.fromEntries(candidates.map(t=>[t.id,`${t.date} · ${t.concept} · ${format(t.received??t.amount)} → ${format((t.received??t.amount)+expense.amount)}`])),candidates[0].id)+`</div>`:'')+`<p class="subtle">En otra moneda se conserva el importe destino y se estima el origen con la tasa del pago. Si después editas o eliminas el gasto, revisa también el pago asignado.</p>`:'<p>No hay pagos pendientes ni una fecha de corte/pago configurada para crear uno automáticamente. Crea un pago desde + → Pago de deuda / tarjeta, o configura el día de corte y de pago de la tarjeta. El gasto se conservará aunque cierres este aviso.</p>'),async f=>{
+  if(!canAllocate)return;
+  const mode=showMode?f.mode:'auto';
+  if(mode==='choose'){if(!candidates.length)return;await persist(allocateExpense(state,expenseId,f.payment));notify('Gasto sumado al pago seleccionado.');return;}
+  if(auto&&auto.candidate){await persist(allocateExpense(state,expenseId,auto.candidate.id));notify('Gasto sumado al pago seleccionado.');return;}
+  if(autoCreates){
+   const sourceId=f.source||defaultPaymentSource(state,a.id);
+   const source=account(sourceId);
+   if(!source)throw Error('Selecciona la cuenta desde la que pagarás.');
+   if(source.currency!==a.currency)throw Error('La cuenta de origen debe tener la misma moneda que la tarjeta.');
+   const payment={id:uid(),kind:'payment',concept:'Pago de '+a.name,category:'Pago de tarjeta',from:sourceId,to:a.id,date:auto.payDate,amount:expense.amount,received:expense.amount,status:'pending'};
+   await persist(createAutoPayment(state,expenseId,payment));
+   notify('Se creó un pago nuevo el '+auto.payDate+' y se le sumó el gasto.');
+   return;
+  }
+  if(!candidates.length)return;
+  await persist(allocateExpense(state,expenseId,candidates[0].id));
+  notify('Gasto sumado al pago seleccionado.');
+ });
+ $('#save').textContent=canAllocate?'Sumar al pago':'Entendido';
+ if(showMode){const modeSel=$('[name=mode]'),box=$('#alloc-choice'),src=$('#alloc-source');modeSel.onchange=()=>{if(box)box.hidden=modeSel.value!=='choose';if(src)src.hidden=modeSel.value!=='auto';};}
 }
 
 function accountForm(a={}){modal('Configurar cuenta',input('name','Nombre',a.name||'','text','required maxlength="80"')+select('type','Tipo',types,a.type||'debit')+input('model','Modelo de tarjeta (opcional)',a.model||'','text','maxlength=80')+select('color','Color de la tarjeta',walletColors,a.color||'auto')+select('currency','Moneda',{MXN:'MXN',CAD:'CAD'},a.currency||'MXN')+input('opening','Saldo inicial (negativo si debes)',(a.opening||0)/100,'number','required step="0.01"')+input('asOf','Saldo al inicio del día',a.asOf||today(),'date','required')+input('limit','Límite de crédito',(a.limit||0)/100,'number','min="0" step="0.01"')+input('cut','Día de corte',a.cut||'','number','min="1" max="31"')+input('pay','Día de pago',a.pay||'','number','min="1" max="31"')+select('available','Incluir en dinero disponible',{yes:'Sí',no:'No'},a.available?'yes':'no')+select('archived','Estado',{no:'Activa',yes:'Archivada'},a.archived?'yes':'no'),async f=>{const next=structuredClone(state);if(a.id&&next.transactions.some(t=>t.from===a.id||t.to===a.id)&&(a.currency!==f.currency||a.type!==f.type))throw Error('Una cuenta con movimientos debe conservar su moneda y tipo. Crea otra cuenta.');const item={id:a.id||uid(),name:f.name,model:f.model,color:f.color,type:f.type,currency:f.currency,opening:Math.round(Number(f.opening)*100),asOf:f.asOf,limit:cents(f.limit),cut:Number(f.cut)||null,pay:Number(f.pay)||null,available:f.available==='yes'&&!['credit','loan','vouchers','receivable'].includes(f.type),archived:f.archived==='yes'};if(a.id)next.accounts=next.accounts.map(x=>x.id===a.id?item:x);else next.accounts.push(item);await persist(next);});}
@@ -340,20 +434,26 @@ function closeModalSheet(){document.body.classList.remove('sheet-open');}
 /* ========================================================================
    Render y navegación (pantallas persistentes, panel push, pestañas)
    ======================================================================== */
-const views={insights:vInsights,movimientos:vMovimientos,calendario:vCalendario,ajustes:vAjustes};
+const views={insights:vInsights,movimientos:vMovimientos,calendario:vCalendario,ajustes:vAjustes,estrategia:vEstrategia};
 function reveal(el){if(!el)return;el.classList.remove('in');void el.offsetWidth;requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('in')));}
-function render(which,animate){const el=$('#s-'+which);if(!el)return;el.innerHTML=views[which]();if(animate)reveal(el);else el.classList.add('in');}
+function render(which,animate){const el=$('#s-'+which);if(!el)return;el.innerHTML=views[which]();if(which==='estrategia')wireEstrategia();if(animate)reveal(el);else el.classList.add('in');}
 function renderAll(){ensureCurrency();Object.keys(views).forEach(k=>render(k,false));if(ui.push)renderPush(false);}
 function setTab(id){
   if(id===ui.tab){if(ui.push){pop();return;}const sc=document.querySelector(`[data-screen="${id}"] .scroller`);sc&&sc.scrollTo({top:0,behavior:'smooth'});return;}
   if(ui.push)pop();ui.tab=id;document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.dataset.screen===id));
   document.querySelectorAll('[data-tab]').forEach(b=>{if(b.dataset.tab===id)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  const i=['insights','movimientos','calendario','ajustes'].indexOf(id);const pill=$('#tpill');if(pill)pill.style.transform=`translateX(${i*69}px)`;
+  const i=['insights','movimientos','calendario','ajustes','estrategia'].indexOf(id);const pill=$('#tpill');if(pill)pill.style.transform=`translateX(${i*55}px)`;
   const mini=$('#mini-icon');if(mini)mini.innerHTML=`<path d="${svgI[id]}"/>`;setCompact(false);render(id,true);
 }
 function setCompact(v){ui.compact=v;document.body.classList.toggle('compact',v);}
-function renderPush(animate){const el=$('#push-content');el.innerHTML=ui.push.type==='salud'?vSalud():vAccount(ui.push.id);$('#ptitle').textContent=ui.push.type==='salud'?'Salud financiera':(account(ui.push.id)?.name||'Cuenta');if(animate){el.classList.remove('in');setTimeout(()=>reveal(el),260);}else el.classList.add('in');}
-function pushView(p){const backs={insights:'Insights',movimientos:'Movimientos',calendario:'Calendario',ajustes:'Ajustes'};$('#back-label').textContent=backs[ui.tab];ui.push=p;const sc=document.querySelector('[data-key="push"]');if(sc){sc.scrollTop=0;onScroll(sc);}renderPush(true);setCompact(false);requestAnimationFrame(()=>document.body.classList.add('pushed'));}
+function vOverdue(){
+  const T=today(),list=state.transactions.filter(t=>t.status==='pending'&&t.date<T).sort((a,b)=>a.date.localeCompare(b.date));
+  return `<div class="head"><div><div class="kicker">Sin confirmar</div><h1>Programados vencidos</h1></div></div>
+  <p class="subtle">${list.length} ${list.length===1?'movimiento programado':'movimientos programados'} con fecha anterior a hoy, sin confirmar todavía.</p>
+  <div class="list">${list.length?list.map(txRow).join(''):'<p class="empty">No tienes movimientos vencidos sin confirmar.</p>'}</div>`;
+}
+function renderPush(animate){const el=$('#push-content');el.innerHTML=ui.push.type==='salud'?vSalud():ui.push.type==='overdue'?vOverdue():vAccount(ui.push.id);$('#ptitle').textContent=ui.push.type==='salud'?'Salud financiera':ui.push.type==='overdue'?'Vencidos':(account(ui.push.id)?.name||'Cuenta');if(animate){el.classList.remove('in');setTimeout(()=>reveal(el),260);}else el.classList.add('in');}
+function pushView(p){const backs={insights:'Insights',movimientos:'Movimientos',calendario:'Calendario',ajustes:'Ajustes',estrategia:'Estrategia'};$('#back-label').textContent=backs[ui.tab];ui.push=p;const sc=document.querySelector('[data-key="push"]');if(sc){sc.scrollTop=0;onScroll(sc);}renderPush(true);setCompact(false);requestAnimationFrame(()=>document.body.classList.add('pushed'));}
 function pop(){document.body.classList.remove('pushed');ui.push=null;}
 function onScroll(sc){const key=sc.dataset.key,y=sc.scrollTop,last=ui.scroll[key]||0;ui.scroll[key]=y;
   if(key==='push'){const bar=$('#pushbar');bar.classList.toggle('solid',y>20);$('#ptitle').style.opacity=clamp((y-30)/26,0,1);}
@@ -378,6 +478,7 @@ document.addEventListener('click',e=>{
     case 'tab':setTab(b.dataset.tab);break;
     case 'expand':setCompact(false);break;
     case 'salud':pushView({type:'salud'});break;
+    case 'overdue':pushView({type:'overdue'});break;
     case 'account':pushView({type:'account',id});break;
     case 'account-edit':accountForm(account(id)||{});break;
     case 'pop':pop();break;
@@ -401,6 +502,11 @@ document.addEventListener('click',e=>{
     case 'add-account':accountForm();break;
     case 'add-rule':ruleForm();break;
     case 'add-income-rule':ruleForm({kind:'income'});break;
+    case 'strategy-seg':ui.strategySeg=b.dataset.v;render('estrategia');break;
+    case 'priority':ui.priority=b.dataset.v;render('estrategia');break;
+    case 'add-goal':goalForm();break;
+    case 'goal-edit':goalForm(goalsList().find(g=>g.id===id));break;
+    case 'goal-delete':deleteGoalForm(goalsList().find(g=>g.id===id));break;
     case 'import-payroll':$('#payroll-file').click();break;
     case 'csv-import':csvImportUI({state,getState:()=>state,modal,persist,uid,esc,money,notify});break;
     case 'csv-template':{const url=URL.createObjectURL(new Blob(['﻿'+CSV_TEMPLATE],{type:'text/csv;charset=utf-8'}));const l=document.createElement('a');l.href=url;l.download='plantilla-pagos-programados.csv';l.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}break;

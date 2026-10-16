@@ -74,6 +74,25 @@
 //   el botón se vaya a su propia línea en vez de aplastar la descripción.
 //   Ver prueba "Programados: la descripción no se colapsa cuando hay
 //   botón de acción".
+// - 2026-10-15: la corrección del historial sin tope de 25 solo se había probado con
+//   la tarjeta de ejemplo; como el fix es genérico (no depende del tipo de cuenta), se
+//   agregó una prueba explícita con una cuenta de débito para confirmarlo también ahí.
+//   Ver prueba "cuenta de débito (no tarjeta): el Historial también muestra todo".
+// - 2026-10-15: varias listas de movimientos —los "Próximos 30 días" del dashboard de
+//   Insights y el Historial dentro del detalle de una cuenta— solo dejaban editar el
+//   movimiento tocando la fila entera, sin los botones de duplicar/eliminar que sí
+//   tenían Movimientos y Calendario. Se agregó transactionActions() en esos lugares
+//   (y un id #proximos-list para poder probarlo sin ambigüedad). Ver pruebas
+//   "Próximos 30 días: cada movimiento tiene botones..." y "Historial: cada
+//   movimiento tiene botones...".
+// - 2026-10-15: al asignar un gasto de tarjeta a un pago programado, la opción
+//   automática elegía siempre el pago pendiente más próximo, sin importar si ese pago
+//   correspondía al ciclo de facturación correcto del gasto (el gasto podía quedar
+//   sumado a un pago de un periodo distinto). Se agregó billingWindow() en finance.js:
+//   calcula el corte (con el ajuste de fin de semana) al que pertenece la fecha del
+//   gasto y la fecha de pago correspondiente; si ya existe un pago programado en esa
+//   ventana se suma ahí, si no, se crea uno nuevo automáticamente. Ver pruebas
+//   "billingWindow(): ..." y "Asignar gasto a un pago: con corte=22/pago=5...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -112,11 +131,11 @@ function check(name, cond, detail = '') {
   check('la app carga sin pantalla en blanco', await exists('.app'));
 
   // ---------- Navegación entre pestañas, sin errores de consola ----------
-  for (const tabId of ['movimientos', 'calendario', 'ajustes', 'insights']) {
+  for (const tabId of ['movimientos', 'calendario', 'ajustes', 'estrategia', 'insights']) {
     await tap(`.tabbar [data-tab="${tabId}"]`);
     await page.waitForTimeout(300);
   }
-  check('sin errores de consola tras navegar las 4 pestañas', consoleErrors.length === 0, consoleErrors.join(' | '));
+  check('sin errores de consola tras navegar las 5 pestañas', consoleErrors.length === 0, consoleErrors.join(' | '));
 
   // ---------- Botones de operadores del teclado de importes ----------
   await tap('.tabbar [data-tab="ajustes"]');
@@ -509,6 +528,155 @@ function check(name, cond, detail = '') {
       JSON.stringify(fallback)
     );
     await hangPage.close();
+  }
+
+  // ---------- Regresión: el Historial sin tope de 25 aplica a CUALQUIER cuenta, no solo tarjetas ----------
+  // La corrección anterior solo se había probado con la tarjeta de ejemplo (credit).
+  // Como el fix quita el .slice(0,25) de forma genérica (aplica al id de cuenta que sea),
+  // aquí se confirma explícitamente con una cuenta de débito (bank), que no es tarjeta.
+  {
+    const histPage2 = await context.newPage();
+    await histPage2.goto(BASE, { waitUntil: 'networkidle' });
+    await histPage2.waitForTimeout(700);
+    const tap3 = (sel) => histPage2.evaluate((s) => document.querySelector(s).click(), sel);
+    const EXTRA2 = 27;
+    for (let i = 0; i < EXTRA2; i++) {
+      await tap3('.fab[data-action="new"]');
+      await histPage2.waitForTimeout(250);
+      await histPage2.fill('[name=concept]', 'Historial debito ' + i);
+      await histPage2.selectOption('[name=from]', 'bank');
+      await histPage2.fill('input[aria-label="Importe"]', '10');
+      await histPage2.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await tap3('#save');
+      await histPage2.waitForTimeout(250);
+    }
+    await histPage2.evaluate(() => document.querySelector('.tabbar [data-tab="calendario"]').click());
+    await histPage2.waitForTimeout(300);
+    await tap3('.wallet[data-id="bank"]');
+    await histPage2.waitForTimeout(500);
+    const histCount2 = await histPage2.evaluate(
+      () => document.querySelectorAll('#push-content .list .tx[data-action="edit"]').length
+    );
+    check(
+      'Insights → cuenta de débito (no tarjeta): el Historial también muestra todo, sin tope de 25',
+      histCount2 >= EXTRA2,
+      'movimientos mostrados: ' + histCount2 + ' (se esperaban al menos ' + EXTRA2 + ')'
+    );
+    await histPage2.close();
+  }
+
+  // ---------- Regresión: botones editar/duplicar/eliminar en TODA vista de movimientos ----------
+  // Varias listas de movimientos (los "Próximos 30 días" del dashboard de Insights y el
+  // Historial dentro del detalle de una cuenta) solo dejaban editar el movimiento tocando
+  // la fila entera, sin botones de duplicar/eliminar como sí tenían Movimientos y
+  // Calendario. Se agregó transactionActions() en esos lugares; aquí se confirma que
+  // ambos listan al menos un botón de ícono de acción.
+  {
+    const actPage = await context.newPage();
+    await actPage.goto(BASE, { waitUntil: 'networkidle' });
+    await actPage.waitForTimeout(700);
+    // El pago de ejemplo del modo demo no siempre cae dentro de los próximos 30 días
+    // (depende de la fecha real en la que se corra la prueba), así que se crea un
+    // programado con fecha de hoy para no depender de eso.
+    await actPage.evaluate(() => document.querySelector('.fab[data-action="new"]').click());
+    await actPage.waitForTimeout(250);
+    await actPage.fill('[name=concept]', 'Programado próximos 30');
+    await actPage.fill('input[aria-label="Importe"]', '20');
+    await actPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await actPage.selectOption('[name=status]', 'pending');
+    await actPage.evaluate(() => document.getElementById('save').click());
+    await actPage.waitForTimeout(400);
+    // Próximos 30 días (dashboard de Insights). Se usa el id dedicado #proximos-list
+    // (no ".tx" a secas) para no confundirse con la lista de "Hoy", que ya tenía estos
+    // botones antes.
+    const proximosActions = await actPage.evaluate(() => {
+      const row = document.querySelector('#proximos-list .tx');
+      return row ? row.querySelectorAll('.icon-action').length : -1;
+    });
+    check(
+      'Insights → "Próximos 30 días": cada movimiento tiene botones de editar/duplicar/eliminar',
+      proximosActions >= 2,
+      'icon-action encontrados: ' + proximosActions
+    );
+    // Historial dentro del detalle de una cuenta (push panel).
+    await actPage.evaluate(() => document.querySelector('.tabbar [data-tab="calendario"]').click());
+    await actPage.waitForTimeout(300);
+    await actPage.evaluate(() => document.querySelector('.wallet[data-id="credit"]').click());
+    await actPage.waitForTimeout(500);
+    const histActions = await actPage.evaluate(() => {
+      const row = document.querySelector('#push-content .list > .tx');
+      return row ? row.querySelectorAll(':scope > .transaction-actions .icon-action').length : -1;
+    });
+    check(
+      'Detalle de cuenta → Historial: cada movimiento tiene botones de duplicar/eliminar',
+      histActions >= 2,
+      'icon-action encontrados: ' + histActions
+    );
+    await actPage.evaluate(() => document.querySelector('[data-action="pop"]').click());
+    await actPage.waitForTimeout(300);
+    await actPage.close();
+  }
+
+  // ---------- Regresión: ciclo de facturación correcto al asignar un gasto a un pago ----------
+  // Pedido: un gasto de tarjeta debe ir al pago que cae entre la fecha de corte a la que
+  // pertenece (ya con el ajuste de fin de semana) y la siguiente fecha de pago; si el gasto
+  // cae DESPUÉS del corte, debe ir al ciclo siguiente, no al pago más próximo sin más. Si no
+  // existe ya un pago en esa ventana, la app debe crear uno automáticamente. Se verifica la
+  // función pura billingWindow() (sin red ni UI) y, por separado, el flujo completo en la app.
+  {
+    const { billingWindow } = await import(new URL('../finance.js', import.meta.url));
+    const card = { cut: 22, pay: 5 };
+    const before = billingWindow(card, '2026-10-20'); // antes del corte del mes
+    const onCut = billingWindow(card, '2026-10-22'); // exactamente el día de corte
+    const after = billingWindow(card, '2026-10-23'); // después del corte: ciclo siguiente
+    check(
+      'billingWindow(): un gasto antes o el día del corte cae en el ciclo que cierra ese corte',
+      before.cutEnd === '2026-10-22' && before.payDate === '2026-11-05' &&
+        onCut.cutEnd === '2026-10-22' && onCut.payDate === '2026-11-05',
+      JSON.stringify({ before, onCut })
+    );
+    check(
+      'billingWindow(): un gasto después del corte cae en el ciclo siguiente (no en el pago más próximo)',
+      after.cutEnd === '2026-11-20' && after.payDate === '2026-12-04' && after.cutEnd !== before.cutEnd,
+      JSON.stringify({ after })
+    );
+
+    const cyclePage = await context.newPage();
+    await cyclePage.goto(BASE, { waitUntil: 'networkidle' });
+    await cyclePage.waitForTimeout(700);
+    const tap5 = (sel) => cyclePage.evaluate((s) => document.querySelector(s).click(), sel);
+    // Configura la tarjeta de ejemplo con corte=22, pago=5.
+    await tap5('.tabbar [data-tab="ajustes"]');
+    await cyclePage.waitForTimeout(300);
+    await tap5('[data-action="account-edit"][data-id="credit"]');
+    await cyclePage.waitForTimeout(300);
+    await cyclePage.evaluate(() => {
+      document.querySelector('[name=cut]').value = '22';
+      document.querySelector('[name=pay]').value = '5';
+    });
+    await tap5('#save');
+    await cyclePage.waitForTimeout(400);
+    // Gasto el día 20 (antes del corte), sin pago existente en esa ventana -> debe ofrecer
+    // crear uno nuevo automáticamente el 2026-11-05.
+    await tap5('.fab[data-action="new"]');
+    await cyclePage.waitForTimeout(250);
+    await cyclePage.fill('[name=concept]', 'Compra ciclo de facturación');
+    await cyclePage.selectOption('[name=from]', 'credit');
+    await cyclePage.fill('input[aria-label="Importe"]', '350');
+    await cyclePage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await cyclePage.evaluate(() => { document.querySelector('[name=date]').value = '2026-10-20'; });
+    await tap5('#save');
+    await cyclePage.waitForTimeout(500);
+    const allocLabel = await cyclePage.evaluate(() => document.getElementById('fields')?.innerText || '');
+    await tap5('#save');
+    await cyclePage.waitForTimeout(500);
+    const toastText = await cyclePage.evaluate(() => document.getElementById('notice')?.textContent || '');
+    check(
+      'Asignar gasto a un pago: con corte=22/pago=5 y un gasto el día 20, crea/asigna el pago en 2026-11-05',
+      allocLabel.includes('2026-11-05') && toastText.includes('2026-11-05'),
+      JSON.stringify({ allocLabel, toastText })
+    );
+    await cyclePage.close();
   }
 
   await browser.close();

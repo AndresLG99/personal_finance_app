@@ -1,5 +1,21 @@
 export const today=()=>new Date().toLocaleDateString('en-CA');
 export function monthDate(date,offset,day){const [y,m]=date.split('-').map(Number);const d=new Date(y,m-1+offset,1);const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(Math.min(day,last)).padStart(2,'0')}`;}
+export const addDays=(date,n)=>{const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+// Fecha de corte/pago de una tarjeta: si el día programado cae en sábado o
+// domingo, se recorre al viernes inmediato anterior (regla de tarjetas de
+// crédito). No se usa para fechas recurrentes genéricas, solo para corte/pago.
+export const cardDate=(date,offset,day)=>{const d=monthDate(date,offset,day);const w=new Date(d+'T12:00:00Z').getUTCDay();return w===0?addDays(d,-2):w===6?addDays(d,-1):d;};
+// Periodo de facturación al que pertenece un gasto de tarjeta: el gasto
+// entra al ciclo que cierra en la primera fecha de corte en o después de su
+// fecha, y ese ciclo se paga en la primera fecha de pago posterior al corte.
+export function billingWindow(a,expenseDate){
+ if(!a.cut||!a.pay)return null;
+ const cutSame=cardDate(expenseDate,0,a.cut);
+ const cutEnd=expenseDate<=cutSame?cutSame:cardDate(expenseDate,1,a.cut);
+ let payDate=cardDate(cutEnd,0,a.pay);
+ if(payDate<=cutEnd)payDate=cardDate(payDate,1,a.pay);
+ return {cutEnd,payDate};
+}
 export function installments(total,count,first){const base=Math.floor(total/count);return Array.from({length:count},(_,i)=>({amount:base+(i===count-1?total-base*count:0),date:monthDate(first,i,Number(first.slice(8)))}));}
 export function balance(state,id,date,projected=false){const a=state.accounts.find(a=>a.id===id);if(!a)return 0;return a.opening+state.transactions.filter(t=>t.date>=a.asOf&&t.date<=date&&(projected||t.status==='done')).reduce((sum,t)=>sum+(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0),0);}
 export const debt=a=>['credit','loan'].includes(a.type);

@@ -1,8 +1,25 @@
-import {today,debt,saveTransactionEdit} from './finance.js?v=20260922-1';
+import {today,debt,saveTransactionEdit,billingWindow} from './finance.js?v=20260922-1';
 export function paymentCandidates(state,expense,current=today()) {
  const a=state.accounts.find(a=>a.id===expense?.from);
  if(!a||!debt(a)||expense.kind!=='expense')return [];
  return state.transactions.filter(t=>t.kind==='payment'&&t.status==='pending'&&t.to===a.id&&t.date>=current&&t.date>=expense.date).sort((a,b)=>a.date.localeCompare(b.date));
+}
+// Ciclo de facturación del gasto (solo si la tarjeta tiene corte y pago
+// configurados): el pago programado que cae entre la fecha de corte a la que
+// pertenece el gasto y la fecha de pago correspondiente, si ya existe uno.
+export function autoPaymentWindow(state,expense,current=today()) {
+ const a=state.accounts.find(a=>a.id===expense?.from);
+ if(!a||!debt(a)||expense.kind!=='expense')return null;
+ const w=billingWindow(a,expense.date);
+ if(!w)return null;
+ const candidate=state.transactions.filter(t=>t.kind==='payment'&&t.status==='pending'&&t.to===a.id&&t.date>w.cutEnd&&t.date<=w.payDate&&t.date>=current).sort((x,y)=>x.date.localeCompare(y.date))[0]||null;
+ return {...w,candidate};
+}
+// Cuenta de origen usada más recientemente para pagar esta tarjeta, como
+// sugerencia al crear automáticamente un pago nuevo.
+export function defaultPaymentSource(state,accountId) {
+ const last=state.transactions.filter(t=>t.kind==='payment'&&t.to===accountId&&t.from).sort((a,b)=>b.date.localeCompare(a.date))[0];
+ return last?.from||null;
 }
 export function allocateExpense(state,expenseId,paymentId,current=today()) {
  const next=structuredClone(state),e=next.transactions.find(t=>t.id===expenseId);
@@ -17,5 +34,15 @@ export function allocateExpense(state,expenseId,paymentId,current=today()) {
  if(!Number.isSafeInteger(updated.amount)||updated.amount<=0||!Number.isSafeInteger(received))throw Error('Revisa los importes del pago.');
  saveTransactionEdit(next,updated,'one');
  e.paymentAllocation={paymentId,amount:e.amount};
+ return next;
+}
+// Crea un pago programado nuevo (porque no existía ninguno dentro del ciclo
+// de facturación del gasto) y le suma el gasto de una vez.
+export function createAutoPayment(state,expenseId,payment) {
+ const next=structuredClone(state),e=next.transactions.find(t=>t.id===expenseId);
+ if(!e)throw Error('El gasto ya no existe.');
+ if(e.paymentAllocation)throw Error('Este gasto ya se asignó a un pago.');
+ next.transactions.push(payment);
+ e.paymentAllocation={paymentId:payment.id,amount:e.amount};
  return next;
 }
