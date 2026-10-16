@@ -19,6 +19,11 @@ export function billingWindow(a,expenseDate){
 export function installments(total,count,first){const base=Math.floor(total/count);return Array.from({length:count},(_,i)=>({amount:base+(i===count-1?total-base*count:0),date:monthDate(first,i,Number(first.slice(8)))}));}
 export function balance(state,id,date,projected=false){const a=state.accounts.find(a=>a.id===id);if(!a)return 0;return a.opening+state.transactions.filter(t=>t.date>=a.asOf&&t.date<=date&&(projected||t.status==='done')).reduce((sum,t)=>sum+(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0),0);}
 export const debt=a=>['credit','loan'].includes(a.type);
+// Una cuenta de Deudas o Por cobrar ya saldada/en 0 al día de hoy se oculta
+// de las vistas de exploración (no aplica a Líquido, y Ajustes siempre
+// muestra todas las cuentas para poder administrarlas).
+export function isSettled(state,a,current=today()){return (debt(a)||a.type==='receivable')&&balance(state,a.id,current)===0;}
+export function visibleAccounts(state,accounts,current=today()){return accounts.filter(a=>!isSettled(state,a,current));}
 export function validate(s){if(!Array.isArray(s.accounts)||!Array.isArray(s.transactions)||!Array.isArray(s.rules))throw Error('Datos inválidos');const ids=new Set(s.accounts.map(a=>a.id));for(const t of s.transactions){if(!Number.isSafeInteger(t.amount)||t.amount<=0)throw Error('El importe debe ser positivo');if(t.from&&!ids.has(t.from)||t.to&&!ids.has(t.to))throw Error('Cuenta inexistente');if(t.from&&t.from===t.to)throw Error('Selecciona cuentas diferentes');}return s;}
 
 export function recurringDate(first,index,every=1,unit='months'){

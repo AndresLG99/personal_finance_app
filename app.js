@@ -11,7 +11,7 @@ import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260922-1';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
 
-import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow} from './finance.js?v=20260922-1';
+import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow,visibleAccounts} from './finance.js?v=20260922-1';
 
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),uid=()=>crypto.randomUUID(),money=(n,c='MXN',tone)=>`<span class="${tone||(n<0?'negative':n>0?'positive':'neutral')}">${new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100)}</span>`;
 const fmt=(n,c='MXN')=>new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100);
@@ -166,7 +166,7 @@ function vInsights(){
   </div>
   ${overdue?`<button type="button" class="banner" data-action="overdue" style="border-color:#FFCF6A55;background:#241C10;width:100%;text-align:left;cursor:pointer"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><span class="btn sm" aria-hidden="true">Revisar</span></button>`:''}
   ${hoyHtml?`<div class="row2 even">${proximosHtml}${hoyHtml}</div>`:proximosHtml}
-  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(active(),a=>walletCard(a))}</div>`;
+  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleAccounts(state,active()),a=>walletCard(a))}</div>`;
 }
 
 function vMovimientos(){
@@ -177,7 +177,7 @@ function vMovimientos(){
   <div style="display:flex;gap:8px"><button class="icon-btn" data-action="month" data-d="-1" aria-label="Mes anterior">‹</button><button class="icon-btn" data-action="month" data-d="1" aria-label="Mes siguiente">›</button></div></div>
   <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><span class="thumb" style="width:calc(50% - 3px);transform:translateX(${segIdx*100}%)"></span><button data-action="seg" data-v="done" aria-pressed="${ui.seg==='done'}">Realizados · ${nd}</button><button data-action="seg" data-v="pending" aria-pressed="${ui.seg==='pending'}">Programados · ${np}</button></div>
   <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9BA6" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Buscar movimientos</span><input id="q" type="search" placeholder="Buscar concepto, categoría o negocio" value="${esc(ui.q)}"></label>
-  <div class="chips">${[['all','Todas']].concat(active().map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div>
+  <div class="chips">${[['all','Todas']].concat(visibleAccounts(state,active()).map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div>
   <div id="mov-list" style="display:flex;flex-direction:column;gap:14px">${movList()}</div>`;
 }
 function movList(){
@@ -212,7 +212,7 @@ function vCalendario(){
     <div class="card tight"><span class="label">Gasto diario prom.</span><span class="mid num">${daily?fmt0(daily,cur):'—'}</span><span class="small">${lasts===null?'sin gastos aún':'te alcanza '+lasts+' días'}</span></div>
   </div>
   <div class="row-between" style="padding:0 4px;align-items:baseline"><h2>Saldos · ${dayLabel(sel).toLowerCase()==='hoy'?'hoy':dayLabel(sel).toLowerCase()}</h2><span class="small">${proj?'proyectado':'real'}</span></div>
-  ${accountGroupSections(active(),a=>walletCard(a,sel,proj))}
+  ${accountGroupSections(visibleAccounts(state,active(),T),a=>walletCard(a,sel,proj))}
   <h2 style="padding:0 4px">Movimientos del día</h2>
   <div class="list">${dayTx.length?dayTx.map(txRow).join(''):'<p class="empty">Un día sin movimientos.</p>'}</div>`;
 }

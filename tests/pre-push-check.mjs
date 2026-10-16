@@ -93,6 +93,14 @@
 //   gasto y la fecha de pago correspondiente; si ya existe un pago programado en esa
 //   ventana se suma ahí, si no, se crea uno nuevo automáticamente. Ver pruebas
 //   "billingWindow(): ..." y "Asignar gasto a un pago: con corte=22/pago=5...".
+// - 2026-10-15: las cuentas de Deudas o Por cobrar que ya se saldaron (saldo 0 al día de
+//   hoy) seguían mostrándose en "Explorar mis cuentas" (Insights), "Saldos" (Calendario) y
+//   los chips de cuenta de Movimientos, mezcladas con las cuentas activas. Se agregaron
+//   isSettled()/visibleAccounts() en finance.js y se usan en esas tres vistas para
+//   ocultarlas; Ajustes → Mis cuentas sigue mostrando todas las cuentas (para poder
+//   administrarlas) y las cuentas de Líquido nunca se ocultan por esta regla. Ver pruebas
+//   "...oculta la cuenta de Deudas ya saldada (0)" y "...NO oculta una cuenta de Líquido
+//   con saldo 0...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -677,6 +685,86 @@ function check(name, cond, detail = '') {
       JSON.stringify({ allocLabel, toastText })
     );
     await cyclePage.close();
+  }
+
+  // ---------- Regresión: cuentas de Deudas/Por cobrar ya saldadas (saldo 0 hoy) se ocultan ----------
+  // Pedido: si una cuenta de Deudas o de Por cobrar ya quedó saldada o está en 0 al día de
+  // hoy, debe ocultarse de todas las pestañas EXCEPTO Ajustes (donde se administran las
+  // cuentas); esto NO aplica a las cuentas de Líquido, que siempre se muestran aunque su
+  // saldo sea 0. Se agregó visibleAccounts()/isSettled() en finance.js, usado en "Explorar
+  // mis cuentas" (Insights), "Saldos" (Calendario) y los chips de cuenta de Movimientos.
+  {
+    const settledPage = await context.newPage();
+    await settledPage.goto(BASE, { waitUntil: 'networkidle' });
+    await settledPage.waitForTimeout(700);
+    const tapS = (sel) => settledPage.evaluate((s) => document.querySelector(s).click(), sel);
+
+    await tapS('.tabbar [data-tab="ajustes"]');
+    await settledPage.waitForTimeout(300);
+
+    // Cuenta de "Deuda por pagar" (división Deudas) ya saldada: saldo inicial 0, sin movimientos.
+    await tapS('#add-account');
+    await settledPage.waitForTimeout(300);
+    await settledPage.fill('[name=name]', 'Deuda saldada · prueba');
+    await settledPage.selectOption('[name=type]', 'loan');
+    // El saldo inicial ya es 0 por defecto en una cuenta nueva; no hace falta tocarlo.
+    await tapS('#save');
+    await settledPage.waitForTimeout(400);
+
+    // Cuenta de Líquido con saldo 0 también, para confirmar que a Líquido NO le aplica la regla.
+    await tapS('#add-account');
+    await settledPage.waitForTimeout(300);
+    await settledPage.fill('[name=name]', 'Débito en cero · prueba');
+    await settledPage.selectOption('[name=type]', 'debit');
+    // El saldo inicial ya es 0 por defecto en una cuenta nueva; no hace falta tocarlo.
+    await tapS('#save');
+    await settledPage.waitForTimeout(400);
+
+    const findId = (n) =>
+      settledPage.evaluate((name) => {
+        const btn = [...document.querySelectorAll('.wallet')].find((w) => w.querySelector('.wn')?.textContent.trim() === name);
+        return btn ? btn.dataset.id : null;
+      }, n);
+    const debtId = await findId('Deuda saldada · prueba');
+    const liquidId = await findId('Débito en cero · prueba');
+
+    const ajustesGroups = await settledPage.evaluate(() =>
+      [...document.querySelectorAll('#s-ajustes .account-group')].map((g) => ({
+        label: g.querySelector('.account-group-label')?.textContent.trim() || null,
+        ids: [...g.querySelectorAll('.wallet')].map((w) => w.dataset.id),
+      }))
+    );
+    const ajustesDeudas = ajustesGroups.find((g) => g.label === 'Deudas');
+    check(
+      'Ajustes → Mis cuentas sigue mostrando una cuenta de Deudas ya saldada (0)',
+      !!debtId && !!ajustesDeudas && ajustesDeudas.ids.includes(debtId),
+      JSON.stringify({ debtId, ajustesGroups })
+    );
+
+    const hasId = (sel, id) => settledPage.evaluate(({ sel, id }) => !!document.querySelector(`${sel} [data-id="${id}"]`), { sel, id });
+
+    check(
+      'Insights → "Explorar mis cuentas" oculta la cuenta de Deudas ya saldada (0)',
+      !!debtId && !(await hasId('#s-insights', debtId)),
+      'debtId=' + debtId
+    );
+    check(
+      'Insights → "Explorar mis cuentas" NO oculta una cuenta de Líquido con saldo 0 (la regla no le aplica)',
+      !!liquidId && (await hasId('#s-insights', liquidId)),
+      'liquidId=' + liquidId
+    );
+    check(
+      'Calendario → "Saldos" oculta la cuenta de Deudas ya saldada (0)',
+      !!debtId && !(await hasId('#s-calendario', debtId)),
+      'debtId=' + debtId
+    );
+    check(
+      'Movimientos → chips de cuenta: no aparece la cuenta de Deudas ya saldada (0)',
+      !!debtId && !(await hasId('.chips', debtId)),
+      'debtId=' + debtId
+    );
+
+    await settledPage.close();
   }
 
   await browser.close();
