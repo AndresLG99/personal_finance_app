@@ -49,6 +49,31 @@
 //   ventana. Ver pruebas "laptop ancha con poca altura..." (debe verse
 //   escritorio) y "celular en horizontal...pantalla táctil" (debe seguir
 //   viéndose móvil, ahora emulando una pantalla táctil de verdad).
+// - 2026-10-15: en Movimientos, los gastos se mostraban en el mismo color
+//   que los ingresos (faltaba la clase CSS "neg" en el monto), tanto en la
+//   lista de movimientos como en el historial de cuenta. Se agregó la
+//   clase "neg" en txAmount() y en la fila de historial de vAccount. Ver
+//   prueba "color de montos: gasto se ve en rojo (clase neg)".
+// - 2026-10-15: la app dependía en tiempo de ejecución de un CDN externo
+//   (esm.sh) para cargar el SDK de Supabase; con conexión lenta o
+//   inestable (datos móviles) esto podía fallar o tardar demasiado sin dar
+//   ningún mensaje, dejando la pantalla en negro. Se vendorizó el SDK como
+//   vendor/supabase.umd.js (cargado antes de app.js con <script defer>) y
+//   se agregó un watchdog de arranque en index.html que, si la app no
+//   renderiza en 12s, muestra un mensaje de error con botón de reintentar.
+//   Ver pruebas "no depende de esm.sh para cargar Supabase" y "si la app
+//   no carga en 12s, se muestra el mensaje de reintentar".
+// - 2026-10-15: el historial de una cuenta (p. ej. Nu Credit) se limitaba
+//   a los últimos 25 movimientos con .slice(0,25), ocultando movimientos
+//   más antiguos sin ningún aviso. Se quitó el límite en vAccount. Ver
+//   prueba "historial de cuenta no se corta a 25 movimientos".
+// - 2026-10-15: en Movimientos → Programados, cuando una fila de
+//   transacción mostraba también el botón de acción (lápiz/basura), el
+//   flexbox se saturaba y la descripción/concepto se colapsaba a 0px de
+//   ancho (invisible). Se ajustó interface.css para que la fila envuelva y
+//   el botón se vaya a su propia línea en vez de aplastar la descripción.
+//   Ver prueba "Programados: la descripción no se colapsa cuando hay
+//   botón de acción".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -348,6 +373,143 @@ function check(name, cond, detail = '') {
   }));
   check('celular en horizontal (932×430, pantalla táctil): se mantiene en modo móvil', landscapeLayout.sidenav === 'none' && landscapeLayout.tabbar === 'flex', JSON.stringify(landscapeLayout));
   await phoneContext.close();
+
+  // ---------- Regresión: los gastos se muestran en rojo, igual que los ingresos en verde ----------
+  // txAmount() (lista de Movimientos) y el Historial de cuenta (vAccount) no le ponían
+  // la clase "neg" a los montos negativos, así que salían en el color de texto normal
+  // en vez de rojo, mientras los ingresos sí llevaban "pos" (verde).
+  {
+    const colorPage = await context.newPage();
+    await colorPage.goto(BASE, { waitUntil: 'networkidle' });
+    await colorPage.waitForTimeout(700);
+    await colorPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await colorPage.waitForTimeout(400);
+    const movColor = await colorPage.evaluate(() => {
+      const amt = document.querySelector('#mov-list .amt');
+      return amt ? { cls: amt.className, color: getComputedStyle(amt).color } : null;
+    });
+    check(
+      'Movimientos: un gasto (egreso) se muestra en rojo (clase "neg"), igual que un ingreso en verde',
+      !!movColor && movColor.cls.includes('neg') && movColor.color === 'rgb(255, 138, 126)',
+      JSON.stringify(movColor)
+    );
+    await colorPage.close();
+  }
+
+  // ---------- Regresión: Nu Credit (o cualquier cuenta) en Insights debe mostrar TODO el historial ----------
+  // vAccount() le hacía .slice(0,25) al historial de la cuenta, así que una cuenta con
+  // más de 25 movimientos solo mostraba los 25 más recientes sin ninguna forma de ver
+  // el resto. Aquí se generan más de 25 movimientos en la tarjeta de ejemplo y se
+  // confirma que el Historial los lista todos, sin tope.
+  {
+    const histPage = await context.newPage();
+    await histPage.goto(BASE, { waitUntil: 'networkidle' });
+    await histPage.waitForTimeout(700);
+    const tap2 = (sel) => histPage.evaluate((s) => document.querySelector(s).click(), sel);
+    const EXTRA = 27;
+    for (let i = 0; i < EXTRA; i++) {
+      await tap2('.fab[data-action="new"]');
+      await histPage.waitForTimeout(250);
+      await histPage.fill('[name=concept]', 'Historial de prueba ' + i);
+      await histPage.selectOption('[name=from]', 'credit');
+      await histPage.fill('input[aria-label="Importe"]', '10');
+      await histPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await tap2('#save');
+      await histPage.waitForTimeout(250);
+    }
+    await histPage.evaluate(() => document.querySelector('.tabbar [data-tab="insights"]').click());
+    await histPage.waitForTimeout(300);
+    await tap2('.wallet[data-id="credit"]');
+    await histPage.waitForTimeout(500);
+    const histCount = await histPage.evaluate(
+      () => document.querySelectorAll('#push-content .list .tx[data-action="edit"]').length
+    );
+    // 27 gastos nuevos + el pago de ejemplo que ya trae el modo demo = 28.
+    check(
+      'Insights → cuenta: el Historial muestra todos los movimientos, sin tope de 25',
+      histCount === EXTRA + 1,
+      'movimientos mostrados: ' + histCount + ' (se esperaban ' + (EXTRA + 1) + ')'
+    );
+    await histPage.close();
+  }
+
+  // ---------- Regresión: en Movimientos → Programados SÍ se ve la descripción ----------
+  // El botón "Confirmar" se sumaba en la misma fila que el ícono+concepto+subtítulo
+  // (ambos con class="tx", flex:1 y min-width:0), así que en pantallas angostas
+  // ".mid-col" (que tiene el concepto y la cuenta/categoría) quedaba con 0px de ancho
+  // y el texto desaparecía — solo en Programados, porque solo ahí aparece el botón
+  // "Confirmar" compitiendo por espacio con el texto.
+  {
+    const progPage = await context.newPage();
+    await progPage.goto(BASE, { waitUntil: 'networkidle' });
+    await progPage.waitForTimeout(700);
+    await progPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await progPage.waitForTimeout(300);
+    await progPage.evaluate(() => document.querySelector('[data-action="seg"][data-v="pending"]').click());
+    await progPage.waitForTimeout(300);
+    await progPage.evaluate(() => document.querySelector('[data-action="month"][data-d="1"]').click());
+    await progPage.waitForTimeout(400);
+    const progInfo = await progPage.evaluate(() => {
+      const row = document.querySelector('#mov-list .tx .tx');
+      const midCol = row?.querySelector('.mid-col');
+      const t2 = row?.querySelector('.t2');
+      return midCol ? { midColWidth: midCol.getBoundingClientRect().width, t2Text: t2?.textContent || '' } : null;
+    });
+    check(
+      'Movimientos → Programados: la descripción (cuenta/categoría) del movimiento es visible, no se aplasta a 0px',
+      !!progInfo && progInfo.midColWidth > 40 && progInfo.t2Text.length > 0,
+      JSON.stringify(progInfo)
+    );
+    await progPage.close();
+  }
+
+  // ---------- Regresión: la app no debe depender de esm.sh en tiempo real para abrir ----------
+  // Reportado: con datos móviles la app tarda mucho y a veces no abre; con wifi sí. Una
+  // causa concreta: el cliente de Supabase se importaba en cada arranque desde
+  // "https://esm.sh/@supabase/supabase-js@...", un CDN externo con su propia conexión
+  // (DNS/TLS aparte) y sub-peticiones propias — un punto de falla extra que una red
+  // móvil inestable puede bloquear o hacer lento. Ahora se sirve como vendor/supabase.umd.js
+  // (mismo origen, sin esm.sh) cargado con <script defer> antes del módulo de la app.
+  {
+    const vendorPage = await context.newPage();
+    const vendorErrors = [];
+    vendorPage.on('pageerror', (e) => vendorErrors.push(e.message));
+    await vendorPage.route('**esm.sh/**', (route) => route.abort());
+    await vendorPage.goto(BASE, { waitUntil: 'networkidle' });
+    await vendorPage.waitForTimeout(700);
+    const vendorInfo = await vendorPage.evaluate(() => ({
+      hasSupabaseGlobal: typeof window.supabase === 'object' && typeof window.supabase?.createClient === 'function',
+      appRendered: document.getElementById('s-insights')?.childElementCount > 0,
+    }));
+    check(
+      'La app carga el cliente de Supabase localmente (vendor/), sin depender de esm.sh',
+      vendorInfo.hasSupabaseGlobal && vendorInfo.appRendered && vendorErrors.length === 0,
+      JSON.stringify({ vendorInfo, vendorErrors })
+    );
+    await vendorPage.close();
+  }
+
+  // ---------- Regresión: si la app no termina de cargar, se avisa en vez de quedar en negro ----------
+  // Complemento del punto anterior: cuando la carga sí falla por completo (red muy mala,
+  // algún archivo nunca responde), antes la pantalla se quedaba negra sin explicación.
+  // Ahora, si a los 12s la app no ha renderizado nada, aparece un aviso con botón de
+  // reintentar (ver el <script> al inicio de index.html).
+  {
+    const hangPage = await context.newPage();
+    await hangPage.route('**/finance.js*', () => {}); // nunca responde: simula una red que se cuelga
+    await hangPage.goto(BASE, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await hangPage.waitForTimeout(13000);
+    const fallback = await hangPage.evaluate(() => ({
+      visible: !!document.getElementById('boot-fallback'),
+      appRendered: document.getElementById('s-insights')?.childElementCount > 0,
+    }));
+    check(
+      'Si la carga se cuelga, a los 12s aparece un aviso de "no se pudo cargar" con botón de reintentar',
+      fallback.visible && !fallback.appRendered,
+      JSON.stringify(fallback)
+    );
+    await hangPage.close();
+  }
 
   await browser.close();
 

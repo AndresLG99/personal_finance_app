@@ -46,6 +46,15 @@ h3{margin:0;font-size:17px;font-weight:600}
 .list{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:2px 14px;display:flex;flex-direction:column}
 .tx{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line2);width:100%;text-align:left}
 .tx:last-child{border-bottom:none}
+/* Fila de un movimiento Programado: botón "Confirmar" + íconos de editar/eliminar
+   compiten por espacio con el mismo "flex:1;min-width:0" que permite truncar el
+   texto en Realizados. En pantallas angostas eso colapsaba .mid-col a 0px y la
+   descripción quedaba invisible. Aquí se le da un piso mínimo y se permite que
+   los botones de la derecha bajen a una segunda línea en vez de aplastar el texto. */
+.tx:has(>.btn.sm){flex-wrap:wrap;row-gap:8px}
+.tx:has(>.btn.sm)>button.tx{min-width:0;flex-basis:200px}
+.tx:has(>.btn.sm) .mid-col{min-width:140px}
+.tx:has(>.btn.sm)>.btn.sm{margin-left:auto}
 .tx .ic{width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;font-weight:700;background:#2A1F1B;color:#FFB18A}
 .tx .ic.in{background:#15302A;color:var(--pos)}.tx .ic.tr{background:#22232C;color:var(--soft)}
 .tx .mid-col{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}

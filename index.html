@@ -1,4 +1,23 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0C0D12"><title>Mis finanzas</title><link rel="stylesheet" href="styles.css?v=20261012-1"><link rel="stylesheet" href="interface.css?v=20261015-1"></head><body>
+<script>
+// Si la app no termina de cargar (conexión lenta/inestable, p. ej. datos
+// móviles), después de 12s mostramos un mensaje claro con botón de reintentar
+// en vez de dejar la pantalla en negro indefinidamente sin explicación.
+(function(){
+  setTimeout(function(){
+    var el=document.getElementById('s-insights');
+    if(el&&!el.childElementCount){
+      var msg=document.createElement('div');
+      msg.id='boot-fallback';
+      msg.setAttribute('role','alert');
+      msg.style.cssText='position:fixed;inset:0;z-index:999;background:#0C0D12;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;text-align:center;font:15px system-ui,sans-serif';
+      msg.innerHTML='<strong style="font-size:18px">No se pudo cargar la app</strong><span style="color:#9A9BA6;max-width:280px">Está tardando más de lo normal. Revisa tu conexión a internet e inténtalo de nuevo.</span><button id="reload-fallback" style="background:#FF7A45;color:#1A0E08;border:none;border-radius:14px;padding:12px 24px;font-weight:700;font-size:15px">Reintentar</button>';
+      document.body.appendChild(msg);
+      document.getElementById('reload-fallback').onclick=function(){location.reload();};
+    }
+  },12000);
+})();
+</script>
 <div class="app" id="app">
   <div class="stage" id="stage">
     <div class="base" id="base">
@@ -49,5 +68,6 @@
   <div id="notice" class="toast" role="status" aria-live="polite"></div>
   <input type="file" id="payroll-file" accept="application/json,.json" hidden>
 </div>
-<script type="module" src="app.js?v=20261012-1"></script>
+<script src="vendor/supabase.umd.js?v=20261015-1" defer></script>
+<script type="module" src="app.js?v=20261015-2"></script>
 </body></html>
