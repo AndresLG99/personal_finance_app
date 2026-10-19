@@ -101,6 +101,46 @@
 //   administrarlas) y las cuentas de Líquido nunca se ocultan por esta regla. Ver pruebas
 //   "...oculta la cuenta de Deudas ya saldada (0)" y "...NO oculta una cuenta de Líquido
 //   con saldo 0...".
+// - 2026-10-18: lote de 5 ajustes solicitados juntos.
+//   1) Se quitaron los botones de ícono siempre visibles (duplicar/eliminar) de la fila de
+//      movimiento (Movimientos, Próximos 30 días del dashboard, Próximos 30 días de una
+//      cuenta e Historial de una cuenta) y se reemplazaron por el gesto de deslizar estilo
+//      iOS: swipeRow() en transaction-actions.js envuelve la fila y un bloque de Pointer
+//      Events con delegación en document (app.js) maneja el arrastre con eje bloqueado
+//      (6px de umbral, horizontal vs. vertical) para no interferir con el scroll de la
+//      lista. Deslizar a la izquierda revela "Eliminar" (ancla a la derecha, open-right) y
+//      a la derecha revela "Duplicar" (ancla a la izquierda, open-left). Al implementarlo
+//      aparecieron dos bugs que se corrigieron antes de probar nada: (a) envolver la fila
+//      en un div extra rompía el divisor entre filas, porque el elemento interno se volvía
+//      ":last-child" trivial de su propio envoltorio — se movió esa regla a .swipe-row y se
+//      canceló el borde propio del elemento interno; (b) el listener de "tocar fuera para
+//      cerrar" no excluía los clics en los botones revelados, así que tocar "Duplicar"/
+//      "Eliminar" nunca llegaba a disparar la acción. Ya con eventos de puntero confirmados
+//      (pointerdown/pointermove/pointerup se disparaban bien), un tercer bug seguía
+//      impidiendo que la fila quedara abierta: el "click" que el navegador dispara justo
+//      después de soltar el arrastre (mismo gesto) llegaba también al listener de "tocar
+//      fuera" y cerraba de inmediato la fila que el propio arrastre acababa de abrir. Se
+//      agregó swipeSuppressClick, una bandera que absorbe ese click cuando el gesto tuvo
+//      movimiento real. Ver pruebas "Movimientos: deslizar..." y "...swipe-row con
+//      Duplicar/Eliminar...".
+//   2) El botón "Confirmar" ahora muestra solo un ícono de check (clase icon-confirm) en vez
+//      del texto "Confirmar", para ocupar menos espacio; conserva aria-label/title
+//      descriptivos. Ver prueba "...ya no muestra el texto Confirmar...".
+//   3) Al confirmar un movimiento programado, el campo de fecha ahora se precarga con la
+//      fecha de HOY (el día en que se confirma) en vez de la fecha original con la que se
+//      programó, porque a veces se confirma adelantado o atrasado. Ver prueba "Confirmar un
+//      movimiento programado precarga la fecha de HOY...".
+//   4) El formulario de cuenta ahora ofrece USD y EUR además de MXN/CAD. El formateo
+//      (Intl.NumberFormat) y las cotizaciones (exchange.js, frankfurter.dev) ya eran
+//      genéricos por divisa, así que no necesitaron cambios. Ver prueba "...ofrece MXN,
+//      CAD, USD y EUR...".
+//   5) Las cuentas de Deudas/Por cobrar ya saldadas (ver bug de 2026-10-15 arriba) se
+//      ocultan de las pantallas principales pero deben seguir pudiendo elegirse al
+//      registrar un "Nuevo movimiento", porque pueden volver a usarse y tener saldo de
+//      nuevo. No hizo falta cambiar código: opts() (los <select> de cuenta en los
+//      formularios de movimiento) nunca filtró por isSettled()/visibleAccounts(), así que
+//      ya se comportaba así; se agregó la prueba de regresión para dejarlo fijo. Ver prueba
+//      '"Nuevo movimiento" SÍ permite elegir una cuenta de Deudas ya saldada...'.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -204,26 +244,118 @@ function check(name, cond, detail = '') {
     await closeSheet();
   }
 
-  // ---------- Regresión: duplicar/eliminar un movimiento desde el ícono ----------
+  // ---------- Regresión (2026-10-18): deslizar (estilo iOS) revela duplicar/eliminar ----------
+  // Los botones de ícono siempre visibles (duplicar/eliminar) se quitaron de la fila de
+  // movimiento para darle más espacio al texto. En su lugar: deslizar hacia la izquierda
+  // revela "Eliminar" (ancla a la derecha, clase open-right) y hacia la derecha revela
+  // "Duplicar" (ancla a la izquierda, clase open-left). Ver swipeRow() en
+  // transaction-actions.js y el bloque de gestos con Pointer Events en app.js.
+  //
+  // Bug encontrado y corregido mientras se implementaba esta prueba: el "click" que el
+  // navegador dispara justo después de soltar el arrastre (mouseup) llegaba al listener de
+  // "tocar fuera para cerrar" y cerraba de inmediato la fila que el propio arrastre acababa
+  // de abrir. Se agregó una bandera (swipeSuppressClick) que absorbe ese click cuando el
+  // gesto tuvo movimiento real, para no deshacer lo que el gesto acaba de hacer.
   await tap('.tabbar [data-tab="movimientos"]');
   await page.waitForTimeout(400);
-  const dupBtn = '.tx .icon-action[data-action="duplicate"]';
-  const delBtn = '.tx .icon-action[data-action="delete"]';
-  if (await exists(dupBtn)) {
-    await tap(dupBtn);
-    await page.waitForTimeout(400);
-    check('icon-action: duplicar movimiento SÍ abre el formulario', await exists('body.sheet-open'), await text('#modal-title'));
-    await closeSheet();
+  check(
+    'Movimientos: ya no hay botones de duplicar/eliminar siempre visibles en la fila',
+    !(await exists('#mov-list .icon-action, #mov-list .transaction-actions'))
+  );
+
+  const dragSwipeRow = async (rowSel, dxTarget) => {
+    const rect = await page.evaluate((s) => {
+      const r = document.querySelector(s);
+      if (!r) return null;
+      const rc = r.getBoundingClientRect();
+      return { x: rc.x, y: rc.y, width: rc.width, height: rc.height };
+    }, rowSel);
+    if (!rect) return false;
+    const cy = rect.y + rect.height / 2;
+    const startX = rect.x + rect.width / 2;
+    await page.mouse.move(startX, cy);
+    await page.mouse.down();
+    await page.mouse.move(startX + dxTarget * 0.5, cy, { steps: 5 });
+    await page.mouse.move(startX + dxTarget, cy, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    return true;
+  };
+  const rowClass = (sel) => page.evaluate((s) => document.querySelector(s)?.className || null, sel);
+  // Cierra cualquier fila abierta tocando fuera de ella (el mismo gesto que un usuario real
+  // haría), para que el siguiente arrastre de la prueba empiece desde cero (base=0).
+  const closeOpenSwipeRows = async () => {
+    await page.evaluate(() => {
+      const h = document.querySelector('#s-movimientos h1') || document.body;
+      h.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 2, clientY: 2, pointerId: 999 }));
+      h.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 2, clientY: 2, pointerId: 999 }));
+    });
+    await page.waitForTimeout(100);
+  };
+
+  const movRowSel = '#mov-list .swipe-row';
+  if (await exists(movRowSel)) {
+    await dragSwipeRow(movRowSel, -90);
+    const openRight = ((await rowClass(movRowSel)) || '').includes('open-right');
+    check('Movimientos: deslizar una fila hacia la izquierda revela "Eliminar" (open-right)', openRight, await rowClass(movRowSel));
+    if (openRight) {
+      await tap(movRowSel + ' .swipe-btn.delete');
+      await page.waitForTimeout(400);
+      check(
+        'Movimientos: tocar "Eliminar" tras deslizar SÍ abre la confirmación',
+        (await exists('body.sheet-open')) && /Eliminar/i.test((await text('#modal-title')) || ''),
+        await text('#modal-title')
+      );
+      await closeSheet();
+    } else {
+      check('Movimientos: tocar "Eliminar" tras deslizar SÍ abre la confirmación', false, 'la fila no quedó abierta (open-right)');
+    }
+    await closeOpenSwipeRows();
+
+    await dragSwipeRow(movRowSel, 90);
+    const openLeft = ((await rowClass(movRowSel)) || '').includes('open-left');
+    check('Movimientos: deslizar una fila hacia la derecha revela "Duplicar" (open-left)', openLeft, await rowClass(movRowSel));
+    if (openLeft) {
+      await tap(movRowSel + ' .swipe-btn.duplicate');
+      await page.waitForTimeout(400);
+      check('Movimientos: tocar "Duplicar" tras deslizar SÍ abre el formulario', await exists('body.sheet-open'), await text('#modal-title'));
+      await closeSheet();
+    } else {
+      check('Movimientos: tocar "Duplicar" tras deslizar SÍ abre el formulario', false, 'la fila no quedó abierta (open-left)');
+    }
+    await closeOpenSwipeRows();
+
+    // El click que termina el propio gesto de arrastre no debe interpretarse como un toque:
+    // no debe volver a cerrar la fila ni disparar "editar" por accidente (el bug de arriba).
+    await dragSwipeRow(movRowSel, -90);
+    await page.waitForTimeout(250);
+    const staysOpenAfterDrag = ((await rowClass(movRowSel)) || '').includes('open-right');
+    check(
+      'Movimientos: tras soltar el arrastre, la fila NO se cierra sola (el click final del gesto no cuenta como "tocar fuera")',
+      staysOpenAfterDrag
+    );
+    check('Movimientos: ese mismo arrastre no abrió por accidente el formulario de editar', !(await exists('body.sheet-open')));
+
+    // Tocar (sin arrastrar) el contenido de una fila ya abierta debe cerrarla, sin abrir "editar".
+    await page.evaluate((s) => {
+      const row = document.querySelector(s);
+      const content = row.lastElementChild;
+      const rc = content.getBoundingClientRect();
+      const x = rc.x + rc.width / 2,
+        y = rc.y + rc.height / 2;
+      content.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerId: 77 }));
+      content.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 77 }));
+      content.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+    }, movRowSel);
+    await page.waitForTimeout(150);
+    const closedAfterTap = !((await rowClass(movRowSel)) || '').match(/open-(left|right)/);
+    check(
+      'Movimientos: tocar (sin arrastrar) una fila ya abierta la cierra sin disparar "editar"',
+      closedAfterTap && !(await exists('body.sheet-open'))
+    );
   } else {
-    check('icon-action: duplicar movimiento SÍ abre el formulario', false, 'no hay movimientos de ejemplo para probar');
-  }
-  if (await exists(delBtn)) {
-    await tap(delBtn);
-    await page.waitForTimeout(400);
-    check('icon-action: eliminar movimiento SÍ abre la confirmación', await exists('body.sheet-open') && /Eliminar/i.test(await text('#modal-title') || ''), await text('#modal-title'));
-    await closeSheet();
-  } else {
-    check('icon-action: eliminar movimiento SÍ abre la confirmación', false, 'no hay movimientos de ejemplo para probar');
+    check('Movimientos: deslizar una fila hacia la izquierda revela "Eliminar" (open-right)', false, 'no hay movimientos de ejemplo para probar');
+    check('Movimientos: deslizar una fila hacia la derecha revela "Duplicar" (open-left)', false, 'no hay movimientos de ejemplo para probar');
   }
 
   // ---------- Formato de fechas: mes con mayúscula inicial + año, SIEMPRE ----------
@@ -573,12 +705,14 @@ function check(name, cond, detail = '') {
     await histPage2.close();
   }
 
-  // ---------- Regresión: botones editar/duplicar/eliminar en TODA vista de movimientos ----------
+  // ---------- Regresión: deslizar para revelar duplicar/eliminar en TODA vista de movimientos ----------
   // Varias listas de movimientos (los "Próximos 30 días" del dashboard de Insights y el
   // Historial dentro del detalle de una cuenta) solo dejaban editar el movimiento tocando
-  // la fila entera, sin botones de duplicar/eliminar como sí tenían Movimientos y
-  // Calendario. Se agregó transactionActions() en esos lugares; aquí se confirma que
-  // ambos listan al menos un botón de ícono de acción.
+  // la fila entera. Primero se agregó ahí transactionActions() (botones de ícono siempre
+  // visibles); el 2026-10-18 se reemplazó por swipeRow() en todas partes (ver el bloque de
+  // "Regresión (2026-10-18): deslizar..." en Movimientos más arriba, donde se prueba el
+  // gesto en sí). Aquí solo se confirma que estas otras dos listas quedaron igual de bien
+  // conectadas (los botones de deslizar existen y los íconos siempre visibles ya no).
   {
     const actPage = await context.newPage();
     await actPage.goto(BASE, { waitUntil: 'networkidle' });
@@ -597,28 +731,32 @@ function check(name, cond, detail = '') {
     // Próximos 30 días (dashboard de Insights). Se usa el id dedicado #proximos-list
     // (no ".tx" a secas) para no confundirse con la lista de "Hoy", que ya tenía estos
     // botones antes.
-    const proximosActions = await actPage.evaluate(() => {
-      const row = document.querySelector('#proximos-list .tx');
-      return row ? row.querySelectorAll('.icon-action').length : -1;
-    });
+    const swipeWiring = (sel) =>
+      actPage.evaluate((s) => {
+        const row = document.querySelector(s);
+        if (!row) return null;
+        return {
+          hasDup: !!row.querySelector(':scope > .swipe-actions.action-left > .swipe-btn[data-action="duplicate"]'),
+          hasDel: !!row.querySelector(':scope > .swipe-actions.action-right > .swipe-btn[data-action="delete"]'),
+          noOldIconAction: row.querySelectorAll('.icon-action, .transaction-actions').length === 0,
+        };
+      }, sel);
+    const proximosWiring = await swipeWiring('#proximos-list .swipe-row');
     check(
-      'Insights → "Próximos 30 días": cada movimiento tiene botones de editar/duplicar/eliminar',
-      proximosActions >= 2,
-      'icon-action encontrados: ' + proximosActions
+      'Insights → "Próximos 30 días": cada movimiento está envuelto en swipe-row con Duplicar/Eliminar (y ya no tiene los íconos siempre visibles)',
+      !!proximosWiring && proximosWiring.hasDup && proximosWiring.hasDel && proximosWiring.noOldIconAction,
+      JSON.stringify(proximosWiring)
     );
     // Historial dentro del detalle de una cuenta (push panel).
     await actPage.evaluate(() => document.querySelector('.tabbar [data-tab="calendario"]').click());
     await actPage.waitForTimeout(300);
     await actPage.evaluate(() => document.querySelector('.wallet[data-id="credit"]').click());
     await actPage.waitForTimeout(500);
-    const histActions = await actPage.evaluate(() => {
-      const row = document.querySelector('#push-content .list > .tx');
-      return row ? row.querySelectorAll(':scope > .transaction-actions .icon-action').length : -1;
-    });
+    const histWiring = await swipeWiring('#push-content .list > .swipe-row');
     check(
-      'Detalle de cuenta → Historial: cada movimiento tiene botones de duplicar/eliminar',
-      histActions >= 2,
-      'icon-action encontrados: ' + histActions
+      'Detalle de cuenta → Historial: cada movimiento está envuelto en swipe-row con Duplicar/Eliminar (y ya no tiene los íconos siempre visibles)',
+      !!histWiring && histWiring.hasDup && histWiring.hasDel && histWiring.noOldIconAction,
+      JSON.stringify(histWiring)
     );
     await actPage.evaluate(() => document.querySelector('[data-action="pop"]').click());
     await actPage.waitForTimeout(300);
@@ -685,6 +823,92 @@ function check(name, cond, detail = '') {
       JSON.stringify({ allocLabel, toastText })
     );
     await cyclePage.close();
+  }
+
+  // ---------- Regresión (2026-10-18): el botón "Confirmar" ahora es solo un ícono ----------
+  // Pedido: que el botón diga solo un check en vez de "Confirmar", para que ocupe menos
+  // espacio en la fila. Debe conservar un aria-label descriptivo para accesibilidad.
+  {
+    const confirmPage = await context.newPage();
+    await confirmPage.goto(BASE, { waitUntil: 'networkidle' });
+    await confirmPage.waitForTimeout(700);
+    await confirmPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await confirmPage.waitForTimeout(300);
+    await confirmPage.evaluate(() => document.querySelector('[data-action="seg"][data-v="pending"]').click());
+    await confirmPage.waitForTimeout(300);
+    // El pago de ejemplo (pendiente) está fechado el día 22 del mes siguiente a hoy.
+    await confirmPage.evaluate(() => document.querySelector('[data-action="month"][data-d="1"]').click());
+    await confirmPage.waitForTimeout(300);
+    const confirmInfo = await confirmPage.evaluate(() => {
+      const btn = document.querySelector('#mov-list [data-action="confirm"]');
+      return btn
+        ? { text: btn.textContent.trim(), hasSvg: !!btn.querySelector('svg'), ariaLabel: btn.getAttribute('aria-label') }
+        : null;
+    });
+    check(
+      'El botón "Confirmar" ya no muestra el texto "Confirmar" (solo un ícono de check)',
+      !!confirmInfo && confirmInfo.text === '' && confirmInfo.hasSvg,
+      JSON.stringify(confirmInfo)
+    );
+    check(
+      'El botón "Confirmar" conserva un aria-label descriptivo para accesibilidad',
+      !!confirmInfo && /Confirmar/i.test(confirmInfo.ariaLabel || ''),
+      JSON.stringify(confirmInfo)
+    );
+    await confirmPage.close();
+  }
+
+  // ---------- Regresión (2026-10-18): confirmar precarga la fecha de HOY, no la original ----------
+  // Pedido: al confirmar un movimiento programado, la fecha debe ser la de hoy (el día en que
+  // se confirma), no la fecha original con la que se programó, porque a veces se confirman
+  // adelantados o atrasados respecto a su calendario original.
+  {
+    const confirmDatePage = await context.newPage();
+    await confirmDatePage.goto(BASE, { waitUntil: 'networkidle' });
+    await confirmDatePage.waitForTimeout(700);
+    const todayStr = await confirmDatePage.evaluate(() => new Date().toLocaleDateString('en-CA'));
+    await confirmDatePage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await confirmDatePage.waitForTimeout(300);
+    await confirmDatePage.evaluate(() => document.querySelector('[data-action="seg"][data-v="pending"]').click());
+    await confirmDatePage.waitForTimeout(300);
+    // El pago de ejemplo (pendiente) está fechado el día 22 del mes siguiente a hoy.
+    await confirmDatePage.evaluate(() => document.querySelector('[data-action="month"][data-d="1"]').click());
+    await confirmDatePage.waitForTimeout(300);
+    const confirmBtnSel = '#mov-list [data-action="confirm"]';
+    let dateInfo = null;
+    if (await confirmDatePage.evaluate((s) => !!document.querySelector(s), confirmBtnSel)) {
+      await confirmDatePage.evaluate((s) => document.querySelector(s).click(), confirmBtnSel);
+      await confirmDatePage.waitForTimeout(400);
+      dateInfo = await confirmDatePage.evaluate(() => ({
+        title: document.getElementById('modal-title')?.textContent,
+        dateVal: document.querySelector('[name=date]')?.value,
+      }));
+    }
+    check(
+      'Confirmar un movimiento programado precarga la fecha de HOY, no la fecha original con la que se programó',
+      !!dateInfo && /Confirmar/i.test(dateInfo.title || '') && dateInfo.dateVal === todayStr,
+      JSON.stringify({ dateInfo, todayStr })
+    );
+    await confirmDatePage.close();
+  }
+
+  // ---------- Regresión (2026-10-18): el formulario de cuenta admite USD y EUR ----------
+  // Pedido: agregar dos divisas más (antes solo MXN y CAD).
+  {
+    const curPage = await context.newPage();
+    await curPage.goto(BASE, { waitUntil: 'networkidle' });
+    await curPage.waitForTimeout(700);
+    await curPage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await curPage.waitForTimeout(300);
+    await curPage.evaluate(() => document.querySelector('#add-account').click());
+    await curPage.waitForTimeout(300);
+    const currencyOptions = await curPage.evaluate(() => [...document.querySelectorAll('[name=currency] option')].map((o) => o.value));
+    check(
+      'El formulario de cuenta ofrece MXN, CAD, USD y EUR como moneda',
+      ['MXN', 'CAD', 'USD', 'EUR'].every((c) => currencyOptions.includes(c)),
+      'opciones encontradas: ' + currencyOptions.join(', ')
+    );
+    await curPage.close();
   }
 
   // ---------- Regresión: cuentas de Deudas/Por cobrar ya saldadas (saldo 0 hoy) se ocultan ----------
@@ -763,6 +987,20 @@ function check(name, cond, detail = '') {
       !!debtId && !(await hasId('.chips', debtId)),
       'debtId=' + debtId
     );
+
+    // Pedido (2026-10-18): aunque se oculte en las pantallas principales, una cuenta ya
+    // saldada (0) debe seguir pudiendo elegirse en "Nuevo movimiento", porque puede volver a
+    // usarse y tener saldo de nuevo más adelante.
+    await tapS('.fab[data-action="new"]');
+    await settledPage.waitForTimeout(300);
+    const fromOptions = await settledPage.evaluate(() => [...document.querySelectorAll('[name=from] option')].map((o) => o.value));
+    check(
+      '"Nuevo movimiento" SÍ permite elegir una cuenta de Deudas ya saldada (0) como origen',
+      !!debtId && fromOptions.includes(debtId),
+      JSON.stringify({ debtId, fromOptions })
+    );
+    await settledPage.evaluate(() => document.getElementById('close').click());
+    await settledPage.waitForTimeout(300);
 
     await settledPage.close();
   }
