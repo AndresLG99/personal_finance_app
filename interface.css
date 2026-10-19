@@ -200,6 +200,23 @@ body.sheet-open .sheet{transform:none}
   .sheet .grab{display:none}
   .sheet-body{padding:8px 26px 26px}
   .welcome[open]{right:40px;bottom:28px}
+
+  /* En escritorio (mouse/trackpad real) el gesto de deslizar se desactiva en
+     app.js (isDesktopPointer) porque arrastrar una fila con mouse no es un
+     gesto descubrible; en su lugar, duplicar/eliminar aparecen como botones
+     normales al final de la fila cuando se pasa el mouse por encima o se
+     llega a ellos con teclado (Tab). Se reordena con flex en vez de deslizar:
+     el contenido (.tx/.settings-row) va primero y ocupa el espacio, luego
+     "Duplicar" y por último "Eliminar", igual que el viejo orden de
+     íconos — pero ocultos hasta el hover para no quitarle espacio al texto. */
+  .swipe-row{overflow:visible;display:flex;align-items:stretch;gap:6px}
+  .swipe-row>.tx,.swipe-row>.settings-row{order:1;flex:1;min-width:0;transform:none!important;transition:none}
+  .swipe-actions{position:static;width:auto;opacity:0;pointer-events:none;transition:opacity .15s ease;flex-shrink:0}
+  .swipe-actions.action-left{order:2}
+  .swipe-actions.action-right{order:3}
+  .swipe-row:hover .swipe-actions,.swipe-row:focus-within .swipe-actions{opacity:1;pointer-events:auto}
+  .swipe-btn{width:38px;border-radius:10px}
+  .swipe-btn svg{width:18px;height:18px}
 }
 @media(min-width:1100px) and (hover:hover) and (pointer:fine){
   .row2{display:grid;grid-template-columns:3fr 2fr;gap:16px;align-items:start}

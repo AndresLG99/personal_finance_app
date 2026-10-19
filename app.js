@@ -470,9 +470,13 @@ p.addEventListener('touchend',()=>{if(x0===null)return;p.style.transition='';con
 
 /* Deslizar un movimiento (estilo iOS): a la derecha revela "Duplicar", a la
    izquierda revela "Eliminar". Con Pointer Events, así funciona igual con
-   touch que con mouse. Se usa delegación de eventos en document para no
-   tener que volver a enlazar nada cada vez que una lista se vuelve a
-   renderizar. */
+   touch que con mouse — pero en escritorio (mouse/trackpad real) arrastrar
+   una fila para revelar botones no es un gesto que nadie espere, así que ahí
+   se desactiva el gesto y en su lugar los botones aparecen al pasar el mouse
+   (hover) o al enfocarlos con teclado — ver el mismo breakpoint
+   "min-width:860px and hover:hover and pointer:fine" en interface.css. Se
+   usa delegación de eventos en document para no tener que volver a enlazar
+   nada cada vez que una lista se vuelve a renderizar. */
 const SWIPE_W=64;
 // El contenido deslizable es siempre el último hijo de .swipe-row (los otros
 // dos hijos son las acciones, position:absolute) — ver swipeRow() en
@@ -480,8 +484,10 @@ const SWIPE_W=64;
 // (open-left/open-right), que sí es el hermano real dentro de .list para
 // efectos del divisor entre filas (ver interface.css).
 function closeSwipes(except){document.querySelectorAll('.swipe-row.open-left,.swipe-row.open-right').forEach(row=>{if(row===except)return;row.classList.remove('open-left','open-right');row.lastElementChild.style.transform='';});}
+const isDesktopPointer=()=>window.matchMedia('(min-width:860px) and (hover:hover) and (pointer:fine)').matches;
 let swipe=null,swipeSuppressClick=false;
 document.addEventListener('pointerdown',e=>{
+  if(isDesktopPointer())return;
   if(e.target.closest('.swipe-btn'))return;
   const row=e.target.closest('.swipe-row');
   if(!row){closeSwipes();return;}

@@ -141,6 +141,17 @@
 //      formularios de movimiento) nunca filtró por isSettled()/visibleAccounts(), así que
 //      ya se comportaba así; se agregó la prueba de regresión para dejarlo fijo. Ver prueba
 //      '"Nuevo movimiento" SÍ permite elegir una cuenta de Deudas ya saldada...'.
+// - 2026-10-19: el gesto de deslizar del punto 1 de arriba (2026-10-18) funcionaba igual con
+//   mouse que con touch porque usa Pointer Events sin distinguir el tipo — en escritorio
+//   (mouse/trackpad real) eso significa arrastrar la fila con el mouse para ver
+//   duplicar/eliminar, un gesto que nadie espera ni tiene ninguna pista visual ahí. Se
+//   agregó isDesktopPointer() en app.js (mismo breakpoint que ya usa el layout de
+//   escritorio: "min-width:860px and hover:hover and pointer:fine") que desactiva el
+//   gesto de deslizar en ese caso; interface.css reordena con flex para que los botones
+//   aparezcan como botones normales al final de la fila al pasar el mouse (hover) o
+//   enfocarlos con teclado (focus-within), igual que cualquier lista de escritorio. El
+//   deslizar sigue intacto en móvil/táctil. Ver pruebas "Escritorio: los botones de
+//   duplicar/eliminar están ocultos hasta pasar el mouse..." y las demás del mismo bloque.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -356,6 +367,91 @@ function check(name, cond, detail = '') {
   } else {
     check('Movimientos: deslizar una fila hacia la izquierda revela "Eliminar" (open-right)', false, 'no hay movimientos de ejemplo para probar');
     check('Movimientos: deslizar una fila hacia la derecha revela "Duplicar" (open-left)', false, 'no hay movimientos de ejemplo para probar');
+  }
+
+  // ---------- Regresión (2026-10-19): en escritorio, hover en vez de deslizar ----------
+  // Pedido: el deslizar queda solo para móvil/táctil; en escritorio (mouse/trackpad real)
+  // los botones de duplicar/eliminar deben verse como botones normales al pasar el mouse
+  // (hover) o al enfocarlos con teclado, porque arrastrar una fila con el mouse no es un
+  // gesto descubrible ahí. isDesktopPointer() en app.js desactiva el gesto de deslizar en
+  // ese caso (mismo breakpoint que el layout de escritorio: "min-width:860px and
+  // hover:hover and pointer:fine"); interface.css reordena con flex para mostrarlos al
+  // final de la fila, ocultos hasta :hover/:focus-within.
+  {
+    const deskPage = await context.newPage();
+    await deskPage.setViewportSize({ width: 1280, height: 900 });
+    await deskPage.goto(BASE, { waitUntil: 'networkidle' });
+    await deskPage.waitForTimeout(700);
+    await deskPage.evaluate(() => document.querySelector('.side-tab[data-tab="movimientos"]').click());
+    await deskPage.waitForTimeout(400);
+    const deskRowSel = '#mov-list .swipe-row';
+
+    const hiddenState = await deskPage.evaluate((s) => {
+      const actions = [...document.querySelectorAll(s + ' .swipe-actions')];
+      if (!actions.length) return null;
+      return actions.map((a) => {
+        const cs = getComputedStyle(a);
+        return { opacity: cs.opacity, pointerEvents: cs.pointerEvents };
+      });
+    }, deskRowSel);
+    check(
+      'Escritorio: los botones de duplicar/eliminar están ocultos hasta pasar el mouse (hover)',
+      !!hiddenState && hiddenState.every((a) => a.opacity === '0' && a.pointerEvents === 'none'),
+      JSON.stringify(hiddenState)
+    );
+
+    // Arrastrar la fila con el mouse NO debe abrirla: el gesto de deslizar está desactivado.
+    const deskRect = await deskPage.evaluate((s) => {
+      const r = document.querySelector(s);
+      const rc = r.getBoundingClientRect();
+      return { x: rc.x, y: rc.y, width: rc.width, height: rc.height };
+    }, deskRowSel);
+    const deskCy = deskRect.y + deskRect.height / 2;
+    const deskStartX = deskRect.x + deskRect.width / 2;
+    await deskPage.mouse.move(deskStartX, deskCy);
+    await deskPage.mouse.down();
+    await deskPage.mouse.move(deskStartX - 45, deskCy, { steps: 5 });
+    await deskPage.mouse.move(deskStartX - 90, deskCy, { steps: 5 });
+    await deskPage.mouse.up();
+    await deskPage.waitForTimeout(150);
+    const classAfterDrag = await deskPage.evaluate((s) => document.querySelector(s)?.className, deskRowSel);
+    check(
+      'Escritorio: arrastrar una fila con el mouse NO la abre (el gesto de deslizar está desactivado ahí)',
+      !/open-(left|right)/.test(classAfterDrag || ''),
+      classAfterDrag
+    );
+    // El mouseup del arrastre puede terminar como un click normal sobre el contenido
+    // (editar); eso es aparte de lo que se prueba aquí, así que se cierra si se abrió.
+    if (await deskPage.evaluate(() => document.body.classList.contains('sheet-open'))) {
+      await deskPage.keyboard.press('Escape');
+      await deskPage.waitForTimeout(300);
+    }
+
+    // Al pasar el mouse sobre la fila, los botones se vuelven visibles y funcionan.
+    await deskPage.hover(deskRowSel);
+    await deskPage.waitForTimeout(150);
+    const hoverState = await deskPage.evaluate((s) => {
+      const a = document.querySelector(s + ' .swipe-actions.action-right');
+      if (!a) return null;
+      const cs = getComputedStyle(a);
+      return { opacity: cs.opacity, pointerEvents: cs.pointerEvents };
+    }, deskRowSel);
+    check(
+      'Escritorio: al pasar el mouse sobre la fila, los botones de duplicar/eliminar se vuelven visibles',
+      !!hoverState && hoverState.opacity === '1' && hoverState.pointerEvents === 'auto',
+      JSON.stringify(hoverState)
+    );
+    await deskPage.click(deskRowSel + ' .swipe-btn.delete');
+    await deskPage.waitForTimeout(400);
+    const deskModalTitle = await deskPage.evaluate(() => document.getElementById('modal-title')?.textContent);
+    check(
+      'Escritorio: tocar "Eliminar" (revelado por hover) SÍ abre la confirmación',
+      (await deskPage.evaluate(() => document.body.classList.contains('sheet-open'))) && /Eliminar/i.test(deskModalTitle || ''),
+      deskModalTitle
+    );
+    await deskPage.keyboard.press('Escape');
+    await deskPage.waitForTimeout(300);
+    await deskPage.close();
   }
 
   // ---------- Formato de fechas: mes con mayúscula inicial + año, SIEMPRE ----------
