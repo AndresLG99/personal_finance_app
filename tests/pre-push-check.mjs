@@ -152,6 +152,38 @@
 //   enfocarlos con teclado (focus-within), igual que cualquier lista de escritorio. El
 //   deslizar sigue intacto en móvil/táctil. Ver pruebas "Escritorio: los botones de
 //   duplicar/eliminar están ocultos hasta pasar el mouse..." y las demás del mismo bloque.
+// - 2026-10-24: lote de 4 pedidos juntos.
+//   1) Recuperar contraseña: accessForm() ahora muestra "¿Olvidaste tu contraseña?" (solo en
+//      inicio de sesión, no en registro), que abre forgotPasswordForm() y llama a
+//      client.auth.resetPasswordForEmail() con un aviso genérico (no revela si el correo
+//      existe). Al volver del enlace del correo, Supabase dispara el evento
+//      PASSWORD_RECOVERY (ya escuchado en onAuthStateChange), que ahora abre
+//      newPasswordForm() y llama a client.auth.updateUser() para fijar la nueva contraseña.
+//      El modo demo de este archivo de pruebas (SUPABASE_URL vacío) nunca muestra la
+//      pantalla de inicio de sesión, así que esta prueba sirve su propio config.js y
+//      vendor/supabase.umd.js falsos (un cliente de Supabase simulado) solo para este
+//      bloque. Ver pruebas "...¿Olvidaste tu contraseña?..." y las demás del mismo bloque.
+//   2) MSI: cambiar el importe total de una compra a meses sin intereses ya existente
+//      lanzaba un error bloqueante. Ahora transactionForm() reparte el importe nuevo menos
+//      lo ya pagado entre las mensualidades pendientes (las confirmadas no se tocan). Ver
+//      pruebas "MSI: cambiar el importe total...".
+//   3) MSI: al editar una mensualidad programada, además de la cuenta de origen/destino
+//      (ya soportado), ahora también puede elegirse si el cambio de importe aplica solo a
+//      esa mensualidad o a esa y las siguientes pendientes — reusando el "scope" que ya
+//      existía para reglas recurrentes (saveTransactionEdit() en finance.js), con la
+//      etiqueta aclarada a "Este y los siguientes pagos pendientes". Bug encontrado y
+//      corregido mientras se escribía esta prueba: cada mensualidad lleva su número de
+//      cuota pegado al concepto ("Compra · 2/4"); al propagar el concepto con scope=future,
+//      se copiaba completo (con el número de la cuota editada) a las demás, así que todas
+//      terminaban mostrando el mismo número. Se corrigió para propagar solo el nombre base
+//      y conservar el número de cuota de cada una. Ver pruebas "Editar la cuota 2/4 con
+//      scope future...".
+//   4) Se agregó la opción de eliminar una cuenta por completo desde su formulario en
+//      Ajustes (antes solo se podía archivar). removeAccount()/accountRefs() en finance.js
+//      bloquean la eliminación si la cuenta tiene movimientos, reglas recurrentes o metas
+//      asociadas (para no perder ese historial ni dejar referencias rotas) y en ese caso
+//      ofrecen archivarla en su lugar; sin ninguna referencia, se elimina de verdad. Ver
+//      pruebas "Eliminar una cuenta CON movimientos..." y "...SIN referencias...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -1099,6 +1131,412 @@ function check(name, cond, detail = '') {
     await settledPage.waitForTimeout(300);
 
     await settledPage.close();
+  }
+
+  // ---------- Lote 2026-10-24, punto 1: recuperar contraseña ----------
+  // El modo demo (SUPABASE_URL vacío) nunca muestra la pantalla de inicio de sesión —
+  // login() ni siquiera llama a accessForm() sin un cliente de Supabase — así que este
+  // flujo no se puede probar con el servidor de pruebas normal. Para probarlo de verdad
+  // (en vez de solo leer el código) se sirve este único page con un config.js y un
+  // vendor/supabase.umd.js falsos: un cliente de Supabase simulado que registra cada
+  // llamada en localStorage (sobrevive a la recarga que hace newPasswordForm() al
+  // terminar) y permite disparar a mano el evento PASSWORD_RECOVERY que en producción
+  // llega al volver del enlace del correo.
+  {
+    const authPage = await context.newPage();
+    const fakeConfig = `export const SUPABASE_URL='https://fake-test.supabase.co'; export const SUPABASE_PUBLISHABLE_KEY='fake-key';`;
+    const fakeSupabase = `
+      window.supabase = {
+        createClient: function () {
+          function log(name, payload) {
+            try {
+              const arr = JSON.parse(localStorage.getItem('__testAuthCalls') || '[]');
+              arr.push([name, payload]);
+              localStorage.setItem('__testAuthCalls', JSON.stringify(arr));
+            } catch (e) {}
+          }
+          return {
+            auth: {
+              onAuthStateChange: function (cb) { window.__testAuthEmit = function (event, session) { cb(event, session); }; },
+              signInWithPassword: async function (args) { log('signInWithPassword', args); return { error: null }; },
+              signUp: async function (args) { log('signUp', args); return { data: {}, error: null }; },
+              resetPasswordForEmail: async function (email, opts) { log('resetPasswordForEmail', { email, opts }); return { error: null }; },
+              updateUser: async function (args) { log('updateUser', args); return { error: null }; },
+              signOut: async function () { log('signOut', {}); return { error: null }; },
+              getSession: async function () { return { data: { session: null }, error: null }; },
+              refreshSession: async function () { return { data: { session: null }, error: null }; },
+            },
+            channel: function () { return { on: function () { return this; }, subscribe: function () { return this; } }; },
+            removeChannel: async function () {},
+            rpc: async function () { return { data: null, error: null }; },
+          };
+        },
+      };
+    `;
+    await authPage.route('**/config.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: fakeConfig }));
+    await authPage.route('**/vendor/supabase.umd.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: fakeSupabase }));
+    await authPage.goto(BASE, { waitUntil: 'networkidle' });
+    await authPage.waitForTimeout(700);
+    await authPage.evaluate(() => localStorage.removeItem('__testAuthCalls'));
+    const tapA = (sel) => authPage.evaluate((s) => document.querySelector(s).click(), sel);
+    const textA = (sel) => authPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const authCalls = () => authPage.evaluate(() => JSON.parse(localStorage.getItem('__testAuthCalls') || '[]'));
+
+    await tapA('.tabbar [data-tab="ajustes"]');
+    await authPage.waitForTimeout(300);
+    await tapA('[data-action="login"]');
+    await authPage.waitForTimeout(400);
+    check('Con un cliente de Supabase disponible, "Iniciar sesión" SÍ abre el formulario de acceso', await textA('#modal-title') === 'Iniciar sesión');
+    check('El formulario de acceso (no registro) muestra el botón "¿Olvidaste tu contraseña?"', await authPage.evaluate(() => !!document.querySelector('#forgot-password')));
+
+    await tapA('#forgot-password');
+    await authPage.waitForTimeout(400);
+    check('"¿Olvidaste tu contraseña?" abre el formulario de recuperación con un campo de correo', (await textA('#modal-title')) === 'Recuperar contraseña' && (await authPage.evaluate(() => !!document.querySelector('[name=email]'))));
+    await authPage.fill('[name=email]', 'prueba@example.com');
+    await tapA('#save');
+    const callsAfterReset = await authCalls();
+    check(
+      'Enviar el formulario de recuperación llama a resetPasswordForEmail con el correo escrito',
+      callsAfterReset.some((c) => c[0] === 'resetPasswordForEmail' && c[1]?.email === 'prueba@example.com'),
+      JSON.stringify(callsAfterReset)
+    );
+    await authPage.waitForTimeout(300);
+    check(
+      'Tras enviar el enlace, se muestra un aviso genérico (no revela si el correo existe)',
+      /Si ese correo tiene una cuenta/i.test((await textA('#notice')) || '')
+    );
+
+    // Simula el regreso desde el enlace del correo: Supabase dispara PASSWORD_RECOVERY.
+    await authPage.keyboard.press('Escape');
+    await authPage.waitForTimeout(300);
+    await authPage.evaluate(() => window.__testAuthEmit && window.__testAuthEmit('PASSWORD_RECOVERY', { user: { id: 'fake-user' } }));
+    await authPage.waitForTimeout(400);
+    const recoveryFields = await authPage.evaluate(() => ({
+      title: document.getElementById('modal-title')?.textContent,
+      hasPassword: !!document.querySelector('[name=password]'),
+      hasConfirm: !!document.querySelector('[name=confirmPassword]'),
+    }));
+    check(
+      'El evento PASSWORD_RECOVERY de Supabase abre el formulario de nueva contraseña',
+      recoveryFields.title === 'Nueva contraseña' && recoveryFields.hasPassword && recoveryFields.hasConfirm,
+      JSON.stringify(recoveryFields)
+    );
+
+    // Contraseñas que no coinciden: debe rechazarse SIN llamar a updateUser.
+    await authPage.fill('[name=password]', 'passwordUno123');
+    await authPage.fill('[name=confirmPassword]', 'passwordDos456');
+    await tapA('#save');
+    await authPage.waitForTimeout(300);
+    const callsAfterMismatch = await authCalls();
+    check(
+      'Nueva contraseña: si las contraseñas no coinciden, se rechaza sin llamar a updateUser',
+      /no coinciden/i.test((await textA('#error')) || '') && !callsAfterMismatch.some((c) => c[0] === 'updateUser'),
+      JSON.stringify({ error: await textA('#error'), callsAfterMismatch })
+    );
+
+    // Contraseñas que sí coinciden: debe llamar a updateUser con la nueva contraseña. Tras
+    // guardar, newPasswordForm() navega de vuelta a la app (location.assign) para iniciar
+    // sesión normal, así que hay que esperar esa navegación antes de poder volver a leer
+    // localStorage (sigue ahí: mismo origen, sobrevive a la recarga).
+    await authPage.fill('[name=password]', 'nuevaClaveSegura1');
+    await authPage.fill('[name=confirmPassword]', 'nuevaClaveSegura1');
+    await tapA('#save');
+    await authPage.waitForLoadState('load').catch(() => {});
+    await authPage.waitForTimeout(300);
+    const callsAfterUpdate = await authCalls().catch(() => []);
+    check(
+      'Nueva contraseña: si coinciden, se llama a updateUser con la nueva contraseña (y luego la app recarga para iniciar sesión normal)',
+      callsAfterUpdate.some((c) => c[0] === 'updateUser' && c[1]?.password === 'nuevaClaveSegura1'),
+      JSON.stringify(callsAfterUpdate)
+    );
+    await authPage.close();
+  }
+
+  // ---------- Lote 2026-10-24, punto 2: cambiar el importe de una MSI reestructura las mensualidades ----------
+  // Pedido: si se cambia el monto total de una compra a meses sin intereses (MSI), las
+  // mensualidades pendientes deben repartirse automáticamente con el nuevo monto; las ya
+  // confirmadas no se tocan. Antes, cambiar el importe de una MSI existente lanzaba un error
+  // bloqueante ("no se puede cambiar sin reestructurar sus cuotas"); ahora transactionForm()
+  // reparte lo que falte (importe nuevo − lo ya pagado) entre las cuotas pendientes.
+  {
+    const msiPage = await context.newPage();
+    await msiPage.goto(BASE, { waitUntil: 'networkidle' });
+    await msiPage.waitForTimeout(700);
+    const tapM = (sel) => msiPage.evaluate((s) => document.querySelector(s).click(), sel);
+    const textM = (sel) => msiPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const creditHistoryM = async () => {
+      await msiPage.evaluate(() => document.querySelector('.tabbar [data-tab="calendario"]').click());
+      await msiPage.waitForTimeout(300);
+      await msiPage.evaluate(() => document.querySelector('.wallet[data-id="credit"]').click());
+      await msiPage.waitForTimeout(500);
+      const rows = await msiPage.evaluate(() =>
+        [...document.querySelectorAll('#push-content .list .swipe-row')].map((r) => ({
+          concept: r.querySelector('.t1')?.textContent,
+          amt: r.querySelector('.amt,.num')?.textContent?.trim(),
+        }))
+      );
+      await msiPage.evaluate(() => document.querySelector('[data-action="pop"]').click());
+      await msiPage.waitForTimeout(300);
+      return rows;
+    };
+
+    // Compra MSI de $6,000 en 6 mensualidades sobre la tarjeta de ejemplo.
+    await tapM('.tabbar [data-tab="movimientos"]');
+    await msiPage.waitForTimeout(300);
+    await tapM('.fab[data-action="new"]');
+    await msiPage.waitForTimeout(300);
+    await msiPage.selectOption('[name=kind]', 'msi');
+    await msiPage.waitForTimeout(200);
+    await msiPage.fill('[name=concept]', 'MSI reestructura prueba');
+    await msiPage.selectOption('[name=from]', 'credit');
+    await msiPage.fill('input[aria-label="Importe"]', '6000');
+    await msiPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await msiPage.evaluate(() => { document.querySelector('[name=count]').value = '6'; });
+    await msiPage.selectOption('[name=source]', 'bank');
+    await tapM('#save');
+    await msiPage.waitForTimeout(400);
+
+    const msiId = await msiPage.evaluate(() => {
+      const row = [...document.querySelectorAll('.swipe-row .t1')].find((e) => e.textContent.trim() === 'MSI reestructura prueba');
+      return row ? row.closest('.swipe-row').querySelector('[data-action="edit"]')?.dataset.id : null;
+    });
+
+    // Confirma la primera mensualidad (queda "ya pagada", no debe tocarse al reestructurar).
+    await tapM('.tabbar [data-tab="insights"]');
+    await msiPage.waitForTimeout(400);
+    const firstConfirmId = await msiPage.evaluate(() => {
+      const btns = [...document.querySelectorAll('#proximos-list [data-action="confirm"]')];
+      const row = btns.find((b) => b.closest('.swipe-row').querySelector('.t1')?.textContent.includes('MSI reestructura prueba'));
+      return row?.dataset.id;
+    });
+    if (firstConfirmId) {
+      await msiPage.evaluate((id) => document.querySelector(`[data-action="confirm"][data-id="${id}"]`).click(), firstConfirmId);
+      await msiPage.waitForTimeout(400);
+      await tapM('#save');
+      await msiPage.waitForTimeout(400);
+    }
+    check('MSI: se pudo confirmar la primera mensualidad (preparación)', !!firstConfirmId);
+
+    // Cambia el importe total de la compra: 6000 -> 9000.
+    if (msiId) {
+      await msiPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+      await msiPage.waitForTimeout(300);
+      await msiPage.evaluate(() => document.querySelector('[data-action="seg"][data-v="done"]')?.click());
+      await msiPage.waitForTimeout(300);
+      await msiPage.evaluate((id) => document.querySelector(`[data-action="edit"][data-id="${id}"]`)?.click(), msiId);
+      await msiPage.waitForTimeout(400);
+      await msiPage.fill('input[aria-label="Importe"]', '9000');
+      await msiPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await tapM('#save');
+      await msiPage.waitForTimeout(400);
+    }
+    check(
+      'MSI: cambiar el importe total de una compra existente ya no lanza un error bloqueante',
+      !(await msiPage.evaluate(() => document.body.classList.contains('sheet-open'))),
+      await textM('#error')
+    );
+
+    const histAfterRestructure = await creditHistoryM();
+    const installmentRows = histAfterRestructure.filter((r) => /^MSI reestructura prueba · \d\/6$/.test(r.concept || ''));
+    const doneOne = installmentRows.find((r) => r.concept.endsWith('1/6'));
+    const pendingFive = installmentRows.filter((r) => !r.concept.endsWith('1/6'));
+    check(
+      'MSI: la mensualidad ya confirmada (1/6, $1,000.00) NO cambia al reestructurar el importe total',
+      doneOne?.amt === '+$1,000.00',
+      JSON.stringify(doneOne)
+    );
+    check(
+      'MSI: las 5 mensualidades pendientes se reestructuran a (9000-1000)/5 = $1,600.00 cada una',
+      pendingFive.length === 5 && pendingFive.every((r) => r.amt === '+$1,600.00'),
+      JSON.stringify(pendingFive)
+    );
+    await msiPage.close();
+  }
+
+  // ---------- Lote 2026-10-24, punto 3: editar una mensualidad MSI con "aplicar a los siguientes" ----------
+  // Pedido: al modificar una mensualidad programada de una MSI, debe poder elegirse si el
+  // cambio aplica solo a esa mensualidad o a esa y las siguientes pendientes (las ya
+  // confirmadas nunca se tocan). saveTransactionEdit() en finance.js ya soportaba este
+  // "scope" de forma genérica (comparte el mecanismo con las reglas recurrentes), así que
+  // aquí se prueba que funciona también para mensualidades MSI con el nuevo texto de la
+  // etiqueta ("Este y los siguientes pagos pendientes").
+  //
+  // Bug encontrado y corregido mientras se escribía esta prueba: cada mensualidad lleva su
+  // número de cuota pegado al concepto ("Compra · 2/4", "Compra · 3/4", …); al propagar el
+  // concepto a las siguientes mensualidades pendientes, saveTransactionEdit() copiaba el
+  // concepto completo de la cuota editada (con SU número), así que las demás cuotas perdían
+  // su propio número y todas terminaban mostrando el mismo "· 2/4". Se corrigió para que solo
+  // se propague el nombre base del concepto, conservando el número de cuota de cada una.
+  {
+    const scopePage = await context.newPage();
+    await scopePage.goto(BASE, { waitUntil: 'networkidle' });
+    await scopePage.waitForTimeout(700);
+    const tapS2 = (sel) => scopePage.evaluate((s) => document.querySelector(s).click(), sel);
+    const existsS = (sel) => scopePage.evaluate((s) => !!document.querySelector(s), sel);
+    const textS = (sel) => scopePage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const openCreditS = async () => {
+      await scopePage.evaluate(() => document.querySelector('.tabbar [data-tab="calendario"]').click());
+      await scopePage.waitForTimeout(300);
+      await scopePage.evaluate(() => document.querySelector('.wallet[data-id="credit"]').click());
+      await scopePage.waitForTimeout(500);
+    };
+    const closePushS = async () => {
+      await scopePage.evaluate(() => document.querySelector('[data-action="pop"]').click());
+      await scopePage.waitForTimeout(300);
+    };
+    const readHistoryS = () =>
+      scopePage.evaluate(() =>
+        [...document.querySelectorAll('#push-content .list .swipe-row')].map((r) => ({
+          concept: r.querySelector('.t1')?.textContent,
+          amt: r.querySelector('.amt,.num')?.textContent?.trim(),
+        }))
+      );
+
+    // Compra MSI de $4,000 en 4 mensualidades; confirma la primera.
+    await tapS2('.tabbar [data-tab="movimientos"]');
+    await scopePage.waitForTimeout(300);
+    await tapS2('.fab[data-action="new"]');
+    await scopePage.waitForTimeout(300);
+    await scopePage.selectOption('[name=kind]', 'msi');
+    await scopePage.waitForTimeout(200);
+    await scopePage.fill('[name=concept]', 'MSI scope prueba');
+    await scopePage.selectOption('[name=from]', 'credit');
+    await scopePage.fill('input[aria-label="Importe"]', '4000');
+    await scopePage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await scopePage.evaluate(() => { document.querySelector('[name=count]').value = '4'; });
+    await scopePage.selectOption('[name=source]', 'bank');
+    await tapS2('#save');
+    await scopePage.waitForTimeout(400);
+
+    await scopePage.evaluate(() => document.querySelector('.tabbar [data-tab="insights"]').click());
+    await scopePage.waitForTimeout(400);
+    const conf1 = await scopePage.evaluate(() => {
+      const btns = [...document.querySelectorAll('#proximos-list [data-action="confirm"]')];
+      const row = btns.find((b) => b.closest('.swipe-row').querySelector('.t1')?.textContent.includes('MSI scope prueba'));
+      return row?.dataset.id;
+    });
+    if (conf1) {
+      await scopePage.evaluate((id) => document.querySelector(`[data-action="confirm"][data-id="${id}"]`).click(), conf1);
+      await scopePage.waitForTimeout(400);
+      await tapS2('#save');
+      await scopePage.waitForTimeout(400);
+    }
+
+    // Edita la mensualidad 2/4 (todavía pendiente) desde el Historial de la tarjeta, con
+    // scope="future": cambia el concepto y el importe a $1,200.
+    await openCreditS();
+    const edit2Id = await scopePage.evaluate(() => {
+      const rows = [...document.querySelectorAll('#push-content .list .swipe-row')];
+      const row = rows.find((r) => r.querySelector('.t1')?.textContent?.includes('MSI scope prueba · 2/4'));
+      return row?.querySelector('[data-action="edit"]')?.dataset.id;
+    });
+    check('MSI: se encontró la mensualidad 2/4 pendiente para editarla', !!edit2Id);
+    if (edit2Id) {
+      await scopePage.evaluate((id) => document.querySelector(`#push-content [data-action="edit"][data-id="${id}"]`).click(), edit2Id);
+      await scopePage.waitForTimeout(400);
+      check('Al editar una mensualidad pendiente de una MSI, aparece el selector "Aplicar cambios a"', await existsS('[name=scope]'));
+      check(
+        'La opción de aplicar a las siguientes dice "Este y los siguientes pagos pendientes"',
+        (await scopePage.evaluate(() => document.querySelector('[name=scope] option[value=future]')?.textContent)) === 'Este y los siguientes pagos pendientes'
+      );
+      await scopePage.selectOption('[name=scope]', 'future');
+      await scopePage.fill('input[aria-label="Importe"]', '1200');
+      await scopePage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await tapS2('#save');
+      await scopePage.waitForTimeout(400);
+    }
+    check('Guardar la edición con scope "future" cierra la hoja sin error', !(await existsS('body.sheet-open')), await textS('#error'));
+
+    await closePushS();
+    await openCreditS();
+    const histAfterScope = await readHistoryS();
+    const row1 = histAfterScope.find((r) => r.concept === 'MSI scope prueba · 1/4');
+    const row2 = histAfterScope.find((r) => r.concept === 'MSI scope prueba · 2/4');
+    const row3 = histAfterScope.find((r) => r.concept === 'MSI scope prueba · 3/4');
+    const row4 = histAfterScope.find((r) => r.concept === 'MSI scope prueba · 4/4');
+    check(
+      'Editar la cuota 2/4 con scope "future": la cuota 1/4 (ya confirmada) NO cambia',
+      row1?.amt === '+$1,000.00',
+      JSON.stringify(row1)
+    );
+    check(
+      'Editar la cuota 2/4 con scope "future": las cuotas 2/4, 3/4 y 4/4 SÍ cambian a $1,200.00',
+      row2?.amt === '+$1,200.00' && row3?.amt === '+$1,200.00' && row4?.amt === '+$1,200.00',
+      JSON.stringify({ row2, row3, row4 })
+    );
+    check(
+      'Editar la cuota 2/4 con scope "future": cada cuota conserva su propio número (no todas quedan como "2/4")',
+      !!row3 && !!row4 && row3.concept === 'MSI scope prueba · 3/4' && row4.concept === 'MSI scope prueba · 4/4',
+      JSON.stringify({ row3, row4 })
+    );
+    await closePushS();
+    await scopePage.close();
+  }
+
+  // ---------- Lote 2026-10-24, punto 4: eliminar cuentas desde Configuración/Ajustes ----------
+  // Pedido: poder eliminar una cuenta que ya no se usa, desde el formulario de cuenta en
+  // Ajustes. Si la cuenta tiene movimientos, reglas recurrentes o metas asociadas, no se
+  // puede eliminar sin perder ese historial, así que se bloquea y se ofrece archivarla en su
+  // lugar (lo que ya existía); solo una cuenta sin ninguna referencia se elimina de verdad.
+  {
+    const delPage = await context.newPage();
+    await delPage.goto(BASE, { waitUntil: 'networkidle' });
+    await delPage.waitForTimeout(700);
+    const tapD = (sel) => delPage.evaluate((s) => document.querySelector(s).click(), sel);
+    const existsD = (sel) => delPage.evaluate((s) => !!document.querySelector(s), sel);
+    const textD = (sel) => delPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+
+    // Caso A: la tarjeta de ejemplo tiene movimientos -> eliminar debe bloquearse y ofrecer archivar.
+    await tapD('.tabbar [data-tab="ajustes"]');
+    await delPage.waitForTimeout(400);
+    await tapD('[data-action="account-edit"][data-id="credit"]');
+    await delPage.waitForTimeout(400);
+    check('El formulario de una cuenta existente muestra el botón "Eliminar esta cuenta"', await existsD('#delete-account'));
+    await tapD('#delete-account');
+    await delPage.waitForTimeout(400);
+    check(
+      'Eliminar una cuenta CON movimientos asociados se bloquea y explica por qué',
+      (await textD('#modal-title')) === 'No se puede eliminar' && /movimiento/i.test((await textD('#fields')) || ''),
+      await textD('#fields')
+    );
+    check(
+      'Al bloquear la eliminación, se ofrece archivar la cuenta en su lugar',
+      (await textD('#save')) === 'Archivar en su lugar'
+    );
+    await delPage.keyboard.press('Escape');
+    await delPage.waitForTimeout(300);
+    await delPage.keyboard.press('Escape');
+    await delPage.waitForTimeout(300);
+
+    // Caso B: una cuenta nueva, sin ningún movimiento/regla/meta asociada -> sí se elimina.
+    await tapD('.tabbar [data-tab="ajustes"]');
+    await delPage.waitForTimeout(300);
+    await tapD('#add-account');
+    await delPage.waitForTimeout(300);
+    await delPage.fill('[name=name]', 'Cuenta sin usar · prueba');
+    await delPage.selectOption('[name=type]', 'debit');
+    await tapD('#save');
+    await delPage.waitForTimeout(400);
+    const newAccId = await delPage.evaluate(() => {
+      const row = [...document.querySelectorAll('[data-action="account-edit"]')].find((b) => b.closest('.wallet')?.textContent?.includes('Cuenta sin usar · prueba'));
+      return row?.dataset.id || null;
+    });
+    check('Se pudo crear una cuenta nueva sin movimientos (preparación)', !!newAccId);
+    if (newAccId) {
+      await delPage.evaluate((id) => document.querySelector(`[data-action="account-edit"][data-id="${id}"]`).click(), newAccId);
+      await delPage.waitForTimeout(400);
+      await tapD('#delete-account');
+      await delPage.waitForTimeout(400);
+      check(
+        'Eliminar una cuenta SIN referencias muestra una confirmación simple (no el bloqueo)',
+        (await textD('#modal-title')) === 'Eliminar cuenta' && (await textD('#save')) === 'Eliminar'
+      );
+      await tapD('#save');
+      await delPage.waitForTimeout(400);
+      const stillExists = await delPage.evaluate((id) => !!document.querySelector(`[data-action="account-edit"][data-id="${id}"]`), newAccId);
+      check('Tras confirmar, la cuenta sin referencias se elimina de verdad (ya no aparece en Ajustes)', !stillExists);
+    }
+    await delPage.close();
   }
 
   await browser.close();

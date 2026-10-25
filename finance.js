@@ -48,6 +48,24 @@ export function removeTransaction(state,id,cancelInstallments=false){
  }
  return next;
 }
+// Eliminar una cuenta por completo (no solo archivarla). Se bloquea si tiene movimientos,
+// reglas recurrentes o metas asociadas, para no dejar referencias rotas ni borrar historial
+// sin que el usuario lo pida explícitamente — en ese caso conviene archivarla en vez de
+// eliminarla, que sí sigue disponible y conserva todo.
+export function accountRefs(state,id){
+ return {
+  transactions:state.transactions.filter(t=>t.from===id||t.to===id).length,
+  rules:state.rules.filter(r=>r.from===id||r.to===id).length,
+  goals:(state.goals||[]).filter(g=>g.accountId===id).length,
+ };
+}
+export function removeAccount(state,id){
+ const refs=accountRefs(state,id),total=refs.transactions+refs.rules+refs.goals;
+ if(total>0)throw Error('Esta cuenta tiene movimientos, reglas recurrentes o metas asociadas; no se puede eliminar. Archívala para conservar su historial.');
+ const next=structuredClone(state);
+ next.accounts=next.accounts.filter(a=>a.id!==id);
+ return next;
+}
 export function removeRule(state,id,removePending=true){
  const next=structuredClone(state);next.rules=next.rules.filter(r=>r.id!==id);
  next.transactions=next.transactions.filter(t=>!(removePending&&t.parent===id&&t.status==='pending')).map(t=>{if(t.parent!==id)return t;const copy={...t};delete copy.parent;return copy;});return next;
@@ -82,13 +100,22 @@ export function balanceAfter(state,transaction){
  return sum+(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0);
  },0);
 }
+// Las mensualidades de una compra MSI llevan su número de cuota pegado al
+// concepto ("Compra · 2/6"); al propagar un cambio de concepto a las demás
+// cuotas pendientes no hay que pisar ese número con el de la cuota editada.
+const msiSuffix=/\s*·\s*\d+\/\d+$/;
 export function saveTransactionEdit(state,item,scope='one'){
  const old=state.transactions.find(t=>t.id===item.id);
  if(!old){state.transactions.push(item);return;}
  const anchor=old.scheduledDate||old.date;
  const fields=['concept','category','business','notes','amount','received','from','to','fx'];
  if(scope==='future'&&old.status==='pending'&&item.status==='pending'&&old.parent){
- for(const t of state.transactions){if(t.id!==old.id&&t.parent===old.parent&&t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)>=anchor){for(const key of fields)t[key]=item[key];}}
+ for(const t of state.transactions){if(t.id!==old.id&&t.parent===old.parent&&t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)>=anchor){
+  for(const key of fields){
+   if(key==='concept'){const base=item.concept.replace(msiSuffix,''),suffix=t.concept.match(msiSuffix);t.concept=suffix?base+suffix[0]:item.concept;}
+   else t[key]=item[key];
+  }
+ }}
  const rule=state.rules.find(r=>r.id===old.parent);if(rule)for(const key of ['concept','category','business','notes','amount','from','to'])rule[key]=item[key];
  }
  item.scheduledDate=old.scheduledDate||old.date;
