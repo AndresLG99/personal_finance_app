@@ -3,15 +3,16 @@ import {walletTheme,walletColors,merchantIcon} from './wallet.js?v=20261024-1';
 import {activityLists,chronological,stampTransactions} from './activity.js?v=20260917-1';
 import {needsWelcome,openWelcome} from './onboarding.js?v=20260924-1';
 import {orderedAccounts,accountGroupSections} from './account-groups.js?v=20261024-1';
-import {swipeRow,iconButton,passwordToggles} from './transaction-actions.js?v=20261019-1';
+import {swipeRow,iconButton,passwordToggles} from './transaction-actions.js?v=20261025-1';
 import {crossCurrency,refreshPending,exchangeFields,bindExchange,quote} from './exchange.js?v=20260915-3';
 import {accountHistory,payoff,duplicateDraft} from './insights.js?v=20260924-2';
 import {enhanceMoneyInputs} from './money-input.js?v=20260922-1';
 import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260922-1';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
+import {sharedOwnedInfo,sharedJoinedAccounts,sharedAccountIdFor,sharedContribution,sharedTxAsTransactions,refreshShared,resetSharedCache,shareAccount,revokeShare,joinSharedAccount,addSharedTransaction,editSharedTransaction,deleteSharedTransaction,syncSharedBase} from './shared-accounts.js?v=20261025-1';
 
-import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow,visibleAccounts,removeAccount,accountRefs} from './finance.js?v=20261024-1';
+import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow,removeAccount,accountRefs} from './finance.js?v=20261024-1';
 
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),uid=()=>crypto.randomUUID(),money=(n,c='MXN',tone)=>`<span class="${tone||(n<0?'negative':n>0?'positive':'neutral')}">${new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100)}</span>`;
 const fmt=(n,c='MXN')=>new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format((n||0)/100);
@@ -27,7 +28,7 @@ const dayLabel=d=>{const t=today();if(d===t)return 'Hoy';if(d===addDays(t,-1))re
 const pct=v=>v===null||!isFinite(v)?'—':Math.round(v*100)+'%';
 const monthsTxt=v=>v===null||!isFinite(v)?'—':(v>=10?Math.round(v):v.toFixed(1))+(v>=0.95&&v<1.05?' mes':' meses');
 
-let client,user,revision=0,busy=false,channel,connectionText='',loginText='Iniciar sesión';
+let client,user,revision=0,busy=false,channel,sharedChannel,connectionText='',loginText='Iniciar sesión';
 
 const empty=()=>({accounts:[],transactions:[],rules:[],goals:[]});
 
@@ -35,8 +36,8 @@ const sample=()=>({accounts:[{id:'bank',name:'Cuenta principal · ejemplo',type:
 
 let state=SUPABASE_URL?empty():sample();const types={debit:'Débito',cash:'Efectivo',saving:'Ahorro',vouchers:'Vales',credit:'Tarjeta de crédito',loan:'Deuda por pagar',receivable:'Préstamo por cobrar'};const kinds={expense:'Gasto',income:'Ingreso',transfer:'Transferencia',payment:'Pago de deuda / tarjeta',msi:'Compra a meses sin intereses'};
 
-const account=id=>state.accounts.find(a=>a.id===id);const name=id=>account(id)?.name||'—';
-const active=()=>state.accounts.filter(a=>!a.archived);
+const account=id=>state.accounts.find(a=>a.id===id)||sharedJoinedAccounts().find(a=>a.id===id);const name=id=>account(id)?.name||'—';
+const active=()=>[...state.accounts,...sharedJoinedAccounts()].filter(a=>!a.archived);
 const txCur=t=>account(t.from||t.to)?.currency||ui.currency;
 
 const ui={tab:'insights',currency:'MXN',month:today().slice(0,7),calMonth:today().slice(0,7),selDay:today(),seg:'done',acct:'all',q:'',push:null,scroll:{},compact:false,strategySeg:'recomendaciones',priority:'snowball'};
@@ -51,7 +52,13 @@ function notify(s){const t=$('#notice');if(!s){t.classList.remove('show');return
 
 async function load(){if(!user)return;const owner=user.id;for(let attempt=0;attempt<2;attempt++){const {data,error}=await client.from('finance_books').select('payload,revision').eq('user_id',owner).maybeSingle();if(error)throw error;if(user?.id!==owner)return;const original=data?.payload||empty(),next=migrateCategories(original);let nextRevision=data?.revision||0;if(JSON.stringify(original)!==JSON.stringify(next)){const result=await saveBook(next,nextRevision);if(result.error){if(result.error.message.includes('CONFLICT')&&attempt===0)continue;throw result.error;}nextRevision=result.data;}if(user?.id!==owner)return;state=next;revision=nextRevision;ensureCurrency();renderAll();if(needsWelcome(state)&&!welcomeSeen(owner))welcome();return;}}
 
-async function persist(next){next=stampTransactions(state,migrateCategories(next));if(SUPABASE_URL&&!user)throw Error('Inicia sesión para guardar tus movimientos.');validate(next);if(!user){state=next;notify('Modo de ejemplo: estos cambios se perderán al recargar.');ensureCurrency();renderAll();return;}const {data,error}=await saveBook(next,revision);if(error){if(error.message.includes('CONFLICT')){await load();throw Error('Hubo un cambio desde otro dispositivo. Recargamos los datos; vuelve a realizar esta operación.');}throw error;}state=next;revision=data;ensureCurrency();renderAll();}
+async function persist(next){next=stampTransactions(state,migrateCategories(next));if(SUPABASE_URL&&!user)throw Error('Inicia sesión para guardar tus movimientos.');validate(next);if(!user){state=next;notify('Modo de ejemplo: estos cambios se perderán al recargar.');ensureCurrency();renderAll();return;}const {data,error}=await saveBook(next,revision);if(error){if(error.message.includes('CONFLICT')){await load();throw Error('Hubo un cambio desde otro dispositivo. Recargamos los datos; vuelve a realizar esta operación.');}throw error;}state=next;revision=data;ensureCurrency();renderAll();
+ // Si alguna de tus cuentas está compartida, mantiene al día (en segundo plano, sin
+ // bloquear el guardado) el saldo base y los metadatos que ve la persona invitada —
+ // ver syncSharedBase en shared-accounts.js. Un error aquí no debe tumbar el guardado
+ // que ya tuvo éxito, así que se absorbe en silencio.
+ syncSharedBase(client,state.accounts,acc=>balance(state,acc.id,today(),false)).catch(()=>{});
+}
 
 async function mutate(fn){if(busy)return;busy=true;try{const next=structuredClone(state);fn(next);await persist(next);}catch(e){notify(e.message);}finally{busy=false;}}
 
@@ -142,7 +149,18 @@ function txRow(t){const inst=/·\s*\d+\/\d+$/.test(t.concept||'');const content=
 // Monto que se muestra en la tarjeta de una cuenta (ya resuelto a "lo que debes" para
 // Deudas, el saldo normal para las demás). Se comparte entre walletCard() y el orden por
 // color+monto de accountGroupSections() para que ambos usen exactamente el mismo número.
-const cardAmount=(a,date,proj)=>{const v=balance(state,a.id,date||today(),proj);return debt(a)?Math.abs(Math.min(0,v)):v;};
+// El saldo real de una cuenta incluye lo que haya en la tabla de movimientos
+// compartidos (ver shared-accounts.js): para una cuenta propia que compartiste, se suma
+// a tu propio saldo; para una cuenta de alguien más a la que te uniste con un código
+// (a.__shared), tu "saldo propio" es 0 (no tienes acceso a su documento) y a.opening ya
+// trae el saldo base que el dueño sincronizó la última vez que guardó.
+const accountBalance=(a,date,proj)=>{const base=a.__shared?a.opening:balance(state,a.id,date,proj);return base+sharedContribution(a,date);};
+const cardAmount=(a,date,proj)=>{const v=accountBalance(a,date||today(),proj);return debt(a)?Math.abs(Math.min(0,v)):v;};
+// Igual que visibleAccounts(state,accounts) de finance.js (oculta una deuda/préstamo ya
+// saldado), pero usando accountBalance en vez de balance() directo, para que también
+// funcione con una cuenta virtual compartida (balance(state,...) no la encuentra en
+// state.accounts y siempre daría 0, lo que la haría ver "ya saldada" por error).
+const visibleActive=(date=today())=>active().filter(a=>!((debt(a)||a.type==='receivable')&&accountBalance(a,date,false)===0));
 function walletCard(a,date,proj,action='account'){const amt=cardAmount(a,date,proj),isDebt=debt(a);return `<button class="wallet w-${walletTheme(a)}" data-action="${action}" data-id="${esc(a.id)}"><span class="wn">${esc(a.name)}</span><span style="display:flex;flex-direction:column"><span class="wv num">${fmt(amt,a.currency)}</span><span class="ws">${isDebt?(a.limit?'debes · límite '+fmt0(a.limit,a.currency):'debes'):types[a.type]+' · '+a.currency}</span></span></button>`;}
 function freqText(r){const e=r.every||1,u=r.unit||'months';const n={days:['día','días'],weeks:['semana','semanas'],months:['mes','meses'],years:['año','años']}[u];return e===1?'Cada '+n[0]:`Cada ${e} ${n[1]}`;}
 
@@ -191,7 +209,7 @@ function vInsights(){
   </div>
   ${overdue?`<button type="button" class="banner" data-action="overdue" style="border-color:#FFCF6A55;background:#241C10;width:100%;text-align:left;cursor:pointer"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><span class="btn sm" aria-hidden="true">Revisar</span></button>`:''}
   ${hoyHtml?`<div class="row2 even">${proximosHtml}${hoyHtml}</div>`:proximosHtml}
-  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleAccounts(state,active()),a=>walletCard(a),a=>sortAmount(a,cardAmount(a,today(),false)))}</div>`;
+  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleActive(),a=>walletCard(a),a=>sortAmount(a,cardAmount(a,today(),false)))}</div>`;
 }
 
 function vMovimientos(){
@@ -202,7 +220,7 @@ function vMovimientos(){
   <div style="display:flex;gap:8px"><button class="icon-btn" data-action="month" data-d="-1" aria-label="Mes anterior">‹</button><button class="icon-btn" data-action="month" data-d="1" aria-label="Mes siguiente">›</button></div></div>
   <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><span class="thumb" style="width:calc(50% - 3px);transform:translateX(${segIdx*100}%)"></span><button data-action="seg" data-v="done" aria-pressed="${ui.seg==='done'}">Realizados · ${nd}</button><button data-action="seg" data-v="pending" aria-pressed="${ui.seg==='pending'}">Programados · ${np}</button></div>
   <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9BA6" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Buscar movimientos</span><input id="q" type="search" placeholder="Buscar concepto, categoría o negocio" value="${esc(ui.q)}"></label>
-  <div class="chips">${[['all','Todas']].concat(visibleAccounts(state,active()).map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div>
+  <div class="chips">${[['all','Todas']].concat(visibleActive().map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div>
   <div id="mov-list" style="display:flex;flex-direction:column;gap:14px">${movList()}</div>`;
 }
 function movList(){
@@ -237,7 +255,7 @@ function vCalendario(){
     <div class="card tight"><span class="label">Gasto diario prom.</span><span class="mid num">${daily?fmt0(daily,cur):'—'}</span><span class="small">${lasts===null?'sin gastos aún':'te alcanza '+lasts+' días'}</span></div>
   </div>
   <div class="row-between" style="padding:0 4px;align-items:baseline"><h2>Saldos · ${dayLabel(sel).toLowerCase()==='hoy'?'hoy':dayLabel(sel).toLowerCase()}</h2><span class="small">${proj?'proyectado':'real'}</span></div>
-  ${accountGroupSections(visibleAccounts(state,active(),T),a=>walletCard(a,sel,proj),a=>sortAmount(a,cardAmount(a,sel,proj)))}
+  ${accountGroupSections(visibleActive(T),a=>walletCard(a,sel,proj),a=>sortAmount(a,cardAmount(a,sel,proj)))}
   <h2 style="padding:0 4px">Movimientos del día</h2>
   <div class="list">${dayTx.length?dayTx.map(txRow).join(''):'<p class="empty">Un día sin movimientos.</p>'}</div>`;
 }
@@ -248,7 +266,7 @@ function vAjustes(){
   <div class="head"><div><div class="kicker">Configuración</div><h1>Ajustes</h1></div></div>
   <div class="card" id="account-card"><div style="display:flex;flex-direction:column;gap:4px"><h2>Mi cuenta</h2><span class="small" style="line-height:1.5">${esc(connectionText||(SUPABASE_URL?'Inicia sesión para ver tus datos.':'Vista de ejemplo: los cambios no se guardan.'))}</span></div><button class="btn" data-action="login">${esc(loginText)}</button><button class="btn ghost" data-action="tutorial">Ver tutorial</button></div>
   ${currencies().length>1?`<div style="display:flex;flex-direction:column;gap:8px"><h3 style="padding:0 4px;color:var(--muted);font-size:14px">Moneda de los indicadores</h3><div class="seg" style="grid-template-columns:repeat(${currencies().length},minmax(0,1fr))"><span class="thumb" style="width:calc(${100/currencies().length}% - ${6/currencies().length}px);transform:translateX(${currencies().indexOf(ui.currency)*100}%)"></span>${currencies().map(c=>`<button data-action="set-cur" data-v="${c}" aria-pressed="${c===ui.currency}">${c}</button>`).join('')}</div></div>`:''}
-  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Mis cuentas</h2><button class="link" id="add-account" data-action="add-account">＋ Agregar</button></div>${accountGroupSections(orderedAccounts(state.accounts),a=>walletCard(a,today(),false,'account-edit'),a=>sortAmount(a,cardAmount(a,today(),false)),' style="flex-wrap:wrap;overflow:visible"')}${!state.accounts.length?'<p class="empty">Comienza agregando una cuenta y su saldo actual.</p>':''}</div>
+  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Mis cuentas</h2><span style="display:flex;gap:14px">${client&&user?'<button type="button" class="link" id="join-shared-account" data-action="join-shared">Unirme con código</button>':''}<button class="link" id="add-account" data-action="add-account">＋ Agregar</button></span></div>${accountGroupSections(orderedAccounts([...state.accounts,...sharedJoinedAccounts()]),a=>walletCard(a,today(),false,a.__shared?'account':'account-edit'),a=>sortAmount(a,cardAmount(a,today(),false)),' style="flex-wrap:wrap;overflow:visible"')}${!state.accounts.length&&!sharedJoinedAccounts().length?'<p class="empty">Comienza agregando una cuenta y su saldo actual.</p>':''}</div>
   <div class="row2 even">${[['Costos recurrentes',rulesE,'rule'],['Ingresos recurrentes',rulesI,'income-rule']].map(([title,list,kindKey])=>`<div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h3 style="color:var(--muted);font-size:14px">${title}</h3><button class="link" id="${kindKey==='income-rule'?'add-income-rule':'add-rule'}" data-action="${kindKey==='income-rule'?'add-income-rule':'add-rule'}">＋ Agregar</button></div><div class="list">${list.length?list.map(r=>`<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.concept)}</span><span class="small">${freqText(r)} · ${esc(name(r.from||r.to))}</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v num" style="color:${r.kind==='income'?'var(--pos)':'var(--text)'};font-weight:600">${fmt(r.amount,account(r.from||r.to)?.currency||'MXN')}</span>${iconButton('edit','rule-edit',r.id,'Editar '+r.concept,esc)}${iconButton('delete','rule-delete',r.id,'Eliminar '+r.concept,esc)}</span></div>`).join(''):'<p class="empty">Ninguno registrado.</p>'}</div></div>`).join('')}</div>
   <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Nóminas</h2><button class="link" data-action="payroll">＋ Registrar</button></div><div class="list">${(state.payrolls||[]).length?(state.payrolls||[]).map(p=>{const bankTx=state.transactions.find(t=>t.payrollId===p.id&&(t.payrollPart==='bank'||(!t.payrollPart&&!t.concept.startsWith('Vales de despensa'))));return `<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px">${esc(p.company)} · ${esc(p.period)}</span><span class="small">Neto bancario ${fmt(bankTx?.amount??p.bankNet??p.totals.net)}</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v num">${fmt(p.totals.net)}</span>${iconButton('edit','payroll-edit',p.id,'Editar nómina de '+p.company,esc)}</span></div>`;}).join(''):'<p class="empty">Todavía no hay nóminas registradas.</p>'}</div><button class="link" data-action="import-payroll">Importar sugerencias de nómina</button></div>
   <div style="display:flex;flex-direction:column;gap:10px"><h2 style="padding:0 4px">Importar pagos programados</h2><p class="subtle" style="padding:0 4px">Carga un CSV con fechas desde hoy, sin límite de año. Revisa la vista previa antes de guardar.</p><div class="grid2"><button class="btn ghost" data-action="csv-template">Descargar plantilla</button><button class="btn ghost" data-action="csv-import">Cargar CSV</button></div><details class="card"><summary style="font-size:15px;font-weight:600">Ver formato y categorías</summary><p class="subtle">Columnas: id (opcional), fecha, tipo, concepto, cuenta_origen, cuenta_destino, monto, categoria, negocio, notas, monto_recibido. Tipos: pago, gasto, ingreso o transferencia. Fechas AAAA-MM-DD o DD/MM/AAAA.</p><p class="subtle">${CATEGORIES.map(esc).join(' · ')}</p></details></div>
@@ -359,8 +377,8 @@ function vSalud(){
 
 function vAccount(id){
   const a=account(id);if(!a)return '<p class="empty">Esta cuenta ya no existe.</p>';
-  const T=today(),v=balance(state,id,T),vp=balance(state,id,addDays(T,30),true),isDebt=debt(a);
-  const days=Array.from({length:31},(_,i)=>{const d=addDays(T,i);return {d,v:d<a.asOf?null:balance(state,id,d,true)};}).filter(x=>x.v!==null);
+  const T=today(),v=accountBalance(a,T,false),vp=accountBalance(a,addDays(T,30),true),isDebt=debt(a);
+  const days=Array.from({length:31},(_,i)=>{const d=addDays(T,i);return {d,v:d<a.asOf?null:accountBalance(a,d,true)};}).filter(x=>x.v!==null);
   const po=isDebt?payoff(state,id):null;
   const events=[];for(let off=0;off<=1;off++){if(a.type==='credit'&&a.cut)events.push({d:cardDate(T,off,a.cut),l:'Fecha de corte'});if(isDebt&&a.pay)events.push({d:cardDate(T,off,a.pay),l:'Fecha de pago'});}
   for(const t of state.transactions)if(t.status==='pending'&&(t.from===id||t.to===id)&&t.date>=T&&t.date<=addDays(T,30))events.push({d:t.date,l:t.concept,amt:(t.to===id?(t.received??t.amount):0)-(t.from===id?t.amount:0),id:t.id});
@@ -375,7 +393,23 @@ function vAccount(id){
   ${isDebt&&(a.cut||a.pay)?`<div class="card tight" style="flex-direction:row;justify-content:space-around;text-align:center"><span><span class="label" style="display:block">Corte</span><span class="mid">día ${a.cut||'—'}</span></span><span><span class="label" style="display:block">Pago</span><span class="mid">día ${a.pay||'—'}</span></span></div>`:''}
   <div class="card"><h2>Próximos 30 días</h2>${chart||'<p class="empty">Sin saldo inicial en este periodo.</p>'}${evs.length?`<div style="display:flex;flex-direction:column">${evs.map(e=>{const row=`<div class="settings-row" style="min-height:48px">${e.id?`<button type="button" class="mid-col" style="display:flex;flex-direction:column;min-width:0;text-align:left" data-action="edit" data-id="${esc(e.id)}">`:'<span style="display:flex;flex-direction:column;min-width:0">'}<span style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.l)}</span><span class="small">${dayLabel(e.d)}</span>${e.id?'</button>':'</span>'}${e.amt!==undefined?`<span class="num" style="font-size:15px;font-weight:600;color:${e.amt>=0?'var(--pos)':'var(--text)'}">${signed(e.amt,a.currency)}</span>`:''}</div>`;return e.id?swipeRow(row,{id:e.id,concept:e.l},esc):row;}).join('')}</div>`:''}</div>
   <div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h2>Historial</h2><span class="small">saldo tras cada movimiento</span></div><div class="list">${hist.length?hist.map(t=>swipeRow(`<div class="tx" style="padding-right:0"><button class="tx" style="padding:0;border:0;flex:1;min-width:0" data-action="edit" data-id="${esc(t.id)}">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}${t.status==='pending'?' · programado':''}</span></span><span style="display:flex;flex-direction:column;align-items:flex-end"><span class="amt num ${t.change>=0?'pos':'neg'}">${signed(t.change,a.currency)}</span><span class="small num">${fmt(t.status==='done'?t.actual:t.projected,a.currency)}</span></span></button></div>`,t,esc)).join(''):'<p class="empty">Sin movimientos todavía.</p>'}</div></div>
-  <button class="btn ghost" data-action="account-edit" data-id="${esc(a.id)}">Editar cuenta</button>`;
+  ${sharedAccountSection(a)}
+  ${a.__shared?'':`<button class="btn ghost" data-action="account-edit" data-id="${esc(a.id)}">Editar cuenta</button>`}`;
+}
+
+// Sección "Movimientos compartidos" en el detalle de una cuenta: aparece tanto si tú
+// compartiste esta cuenta (es tuya, tiene código) como si te uniste a la de otra persona
+// con un código. Cada movimiento muestra quién lo agregó indirectamente: el que creaste
+// tú se puede deslizar para eliminar/editar, los de los demás se ven pero no se pueden
+// tocar (ver sharedTxAsTransactions en shared-accounts.js — eso es lo que garantiza que
+// cada persona solo modifique lo suyo, reforzado además por los permisos en Supabase).
+function sharedAccountSection(a){
+  const said=sharedAccountIdFor(a);if(!said)return '';
+  const list=sharedTxAsTransactions(a,user?.id);
+  return `<div class="card"><div class="row-between" style="padding:0 4px"><h2>Movimientos compartidos</h2><button type="button" class="link" data-action="add-shared-tx" data-id="${esc(a.id)}">＋ Agregar</button></div><div class="list">${list.length?list.map(t=>{
+    const row=`<div class="tx" style="padding-right:0">${t.__readonly?`<div class="tx" style="padding:0;border:0;flex:1;min-width:0">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</div>`:`<button type="button" class="tx" style="padding:0;border:0;flex:1;min-width:0" data-action="edit" data-id="${esc(t.id)}">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</button>`}</div>`;
+    return t.__readonly?row:swipeRow(row,t,esc,{noDuplicate:true});
+  }).join(''):'<p class="empty">Nadie ha agregado movimientos compartidos todavía.</p>'}</div></div>`;
 }
 
 /* ========================================================================
@@ -450,7 +484,67 @@ function allocationForm(expenseId){
  if(showMode){const modeSel=$('[name=mode]'),box=$('#alloc-choice'),src=$('#alloc-source');modeSel.onchange=()=>{if(box)box.hidden=modeSel.value!=='choose';if(src)src.hidden=modeSel.value!=='auto';};}
 }
 
-function accountForm(a={}){modal('Configurar cuenta',input('name','Nombre',a.name||'','text','required maxlength="80"')+select('type','Tipo',types,a.type||'debit')+input('model','Modelo de tarjeta (opcional)',a.model||'','text','maxlength=80')+colorField(a.color||'auto')+select('currency','Moneda',{MXN:'MXN',CAD:'CAD',USD:'USD',EUR:'EUR'},a.currency||'MXN')+input('opening','Saldo inicial (negativo si debes)',(a.opening||0)/100,'number','required step="0.01"')+input('asOf','Saldo al inicio del día',a.asOf||today(),'date','required')+input('limit','Límite de crédito',(a.limit||0)/100,'number','min="0" step="0.01"')+input('cut','Día de corte',a.cut||'','number','min="1" max="31"')+input('pay','Día de pago',a.pay||'','number','min="1" max="31"')+select('available','Incluir en dinero disponible',{yes:'Sí',no:'No'},a.available?'yes':'no')+select('archived','Estado',{no:'Activa',yes:'Archivada'},a.archived?'yes':'no')+(a.id?`<p><button type="button" id="delete-account" class="link" style="color:#C0392B">Eliminar esta cuenta</button></p>`:''),async f=>{const next=structuredClone(state);if(a.id&&next.transactions.some(t=>t.from===a.id||t.to===a.id)&&(a.currency!==f.currency||a.type!==f.type))throw Error('Una cuenta con movimientos debe conservar su moneda y tipo. Crea otra cuenta.');const item={id:a.id||uid(),name:f.name,model:f.model,color:f.color,type:f.type,currency:f.currency,opening:Math.round(Number(f.opening)*100),asOf:f.asOf,limit:cents(f.limit),cut:Number(f.cut)||null,pay:Number(f.pay)||null,available:f.available==='yes'&&!['credit','loan','vouchers','receivable'].includes(f.type),archived:f.archived==='yes'};if(a.id)next.accounts=next.accounts.map(x=>x.id===a.id?item:x);else next.accounts.push(item);await persist(next);});bindColorField($('#fields'));if(a.id)$('#delete-account').onclick=()=>deleteAccountForm(a);}
+// ---------- Cuentas compartidas: unirse con código, agregar/editar/eliminar un
+// movimiento compartido (ver shared-accounts.js para el resto: compartir/dejar de
+// compartir vive dentro de accountForm, más abajo). ----------
+function joinSharedAccountForm(){
+  if(!client||!user){notify('Inicia sesión para unirte a una cuenta compartida.');return;}
+  modal('Unirme con código',input('code','Código que te compartieron','','text','required maxlength="20"'),async f=>{
+    await joinSharedAccount(client,f.code);
+    await refreshShared(client,user.id);
+    ensureCurrency();renderAll();
+    notify('Te uniste a la cuenta compartida.');
+  });
+}
+function addSharedTxForm(a){
+  if(!a){notify('Esta cuenta ya no existe.');return;}
+  const said=sharedAccountIdFor(a);
+  if(!said){notify('Esta cuenta ya no está compartida.');return;}
+  modal('Nuevo movimiento compartido',select('kind','Tipo',{expense:'Gasto',income:'Ingreso'},'expense')+input('concept','Concepto','','text','required maxlength="150"')+categoryField('')+input('date','Fecha',today(),'date','required')+input('amount','Importe','','number','required min="0.01" step="0.01"'),async f=>{
+    checkCategory(f.category);
+    await addSharedTransaction(client,said,user.id,{kind:f.kind,amount:cents(f.amount),concept:f.concept,category:f.category||'',date:f.date});
+    await refreshShared(client,user.id);
+    renderAll();
+  });
+}
+function editSharedTxForm(sharedTxId){
+  const rawId=sharedTxId.replace(/^stx:/,'');
+  const accts=[...state.accounts.filter(x=>sharedOwnedInfo(x.id)),...sharedJoinedAccounts()];
+  let t=null;
+  for(const acc of accts){const found=sharedTxAsTransactions(acc,user?.id).find(x=>x.id===sharedTxId);if(found){t=found;break;}}
+  if(!t||t.__readonly){notify('Solo quien creó este movimiento puede editarlo.');return;}
+  modal('Editar movimiento compartido',select('kind','Tipo',{expense:'Gasto',income:'Ingreso'},t.kind)+input('concept','Concepto',t.concept||'','text','required maxlength="150"')+categoryField(t.category)+input('date','Fecha',t.date,'date','required')+input('amount','Importe',t.amount/100,'number','required min="0.01" step="0.01"'),async f=>{
+    checkCategory(f.category);
+    await editSharedTransaction(client,rawId,{kind:f.kind,amount:cents(f.amount),concept:f.concept,category:f.category||'',date:f.date});
+    await refreshShared(client,user.id);
+    renderAll();
+  });
+}
+function deleteSharedTxForm(sharedTxId){
+  modal('Eliminar movimiento',`<p>¿Eliminar este movimiento compartido? Esta acción no se puede deshacer.</p>`,async()=>{
+    await deleteSharedTransaction(client,sharedTxId.replace(/^stx:/,''));
+    await refreshShared(client,user.id);
+    renderAll();
+  });
+}
+function accountForm(a={}){modal('Configurar cuenta',input('name','Nombre',a.name||'','text','required maxlength="80"')+select('type','Tipo',types,a.type||'debit')+input('model','Modelo de tarjeta (opcional)',a.model||'','text','maxlength=80')+colorField(a.color||'auto')+select('currency','Moneda',{MXN:'MXN',CAD:'CAD',USD:'USD',EUR:'EUR'},a.currency||'MXN')+input('opening','Saldo inicial (negativo si debes)',(a.opening||0)/100,'number','required step="0.01"')+input('asOf','Saldo al inicio del día',a.asOf||today(),'date','required')+input('limit','Límite de crédito',(a.limit||0)/100,'number','min="0" step="0.01"')+input('cut','Día de corte',a.cut||'','number','min="1" max="31"')+input('pay','Día de pago',a.pay||'','number','min="1" max="31"')+select('available','Incluir en dinero disponible',{yes:'Sí',no:'No'},a.available?'yes':'no')+select('archived','Estado',{no:'Activa',yes:'Archivada'},a.archived?'yes':'no')+shareSectionFields(a)+(a.id?`<p><button type="button" id="delete-account" class="link" style="color:#C0392B">Eliminar esta cuenta</button></p>`:''),async f=>{const next=structuredClone(state);if(a.id&&next.transactions.some(t=>t.from===a.id||t.to===a.id)&&(a.currency!==f.currency||a.type!==f.type))throw Error('Una cuenta con movimientos debe conservar su moneda y tipo. Crea otra cuenta.');const item={id:a.id||uid(),name:f.name,model:f.model,color:f.color,type:f.type,currency:f.currency,opening:Math.round(Number(f.opening)*100),asOf:f.asOf,limit:cents(f.limit),cut:Number(f.cut)||null,pay:Number(f.pay)||null,available:f.available==='yes'&&!['credit','loan','vouchers','receivable'].includes(f.type),archived:f.archived==='yes'};if(a.id)next.accounts=next.accounts.map(x=>x.id===a.id?item:x);else next.accounts.push(item);await persist(next);});bindColorField($('#fields'));if(a.id)$('#delete-account').onclick=()=>deleteAccountForm(a);bindShareSection(a);}
+
+// "Compartir esta cuenta" dentro del formulario de edición: solo para una cuenta propia
+// (no una virtual de alguien más) ya existente, y solo con sesión activa (compartir
+// necesita el backend real). Comparte/deja de compartir de inmediato (no espera a que se
+// guarde el formulario completo) y vuelve a abrir el mismo formulario para reflejar el
+// resultado.
+function shareSectionFields(a){
+  if(!(a.id&&!a.__shared&&client&&user))return '';
+  const info=sharedOwnedInfo(a.id);
+  return `<div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:8px">${info?`<span class="small">Compartida · código <strong style="font-size:16px;letter-spacing:1px">${esc(info.share_code)}</strong> · quien lo tenga puede agregarle movimientos</span><button type="button" id="unshare-account" class="link" style="color:#C0392B">Dejar de compartir</button>`:`<span class="small">Comparte esta cuenta con un código para que otra persona pueda agregarle gasto/ingreso desde su propia sesión.</span><button type="button" id="share-account" class="link">Compartir esta cuenta</button>`}</div>`;
+}
+function bindShareSection(a){
+  if(!(a.id&&!a.__shared&&client&&user))return;
+  const shareBtn=$('#share-account'),unshareBtn=$('#unshare-account');
+  if(shareBtn)shareBtn.onclick=async()=>{try{shareBtn.disabled=true;await shareAccount(client,user.id,a);await refreshShared(client,user.id);accountForm(a);}catch(e){notify(e.message);shareBtn.disabled=false;}};
+  if(unshareBtn)unshareBtn.onclick=async()=>{try{unshareBtn.disabled=true;const info=sharedOwnedInfo(a.id);if(info)await revokeShare(client,info.id);await refreshShared(client,user.id);accountForm(a);}catch(e){notify(e.message);unshareBtn.disabled=false;}};
+}
 // Eliminar cuenta (desde Ajustes → Mis cuentas → tocar la cuenta → "Eliminar esta
 // cuenta"). Si tiene movimientos/reglas/metas asociadas no se borra (se perdería
 // historial y quedarían referencias rotas); en ese caso se ofrece archivarla en su
@@ -641,10 +735,12 @@ document.addEventListener('click',e=>{
     case 'seg':ui.seg=b.dataset.v;{const th=document.querySelector('#s-movimientos .seg .thumb');if(th)th.style.transform=`translateX(${ui.seg==='done'?0:100}%)`;document.querySelectorAll('#s-movimientos .seg button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===ui.seg));const l=$('#mov-list');if(l)l.innerHTML=movList();}break;
     case 'acct':ui.acct=id;document.querySelectorAll('#s-movimientos .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.id===id));{const l=$('#mov-list');if(l)l.innerHTML=movList();}break;
     case 'day':ui.selDay=b.dataset.d;{const sc=document.querySelector('[data-key="calendario"]'),y=sc?sc.scrollTop:0;render('calendario');if(sc)sc.scrollTop=y;}break;
-    case 'edit':transactionForm(state.transactions.find(t=>t.id===id));break;
+    case 'edit':id&&id.startsWith('stx:')?editSharedTxForm(id):transactionForm(state.transactions.find(t=>t.id===id));break;
     case 'confirm':transactionForm({...state.transactions.find(t=>t.id===id),status:'done'},true);break;
     case 'duplicate':transactionForm(duplicateDraft(state.transactions.find(t=>t.id===id)));break;
-    case 'delete':deleteTransactionForm(state.transactions.find(t=>t.id===id));break;
+    case 'delete':id&&id.startsWith('stx:')?deleteSharedTxForm(id):deleteTransactionForm(state.transactions.find(t=>t.id===id));break;
+    case 'add-shared-tx':addSharedTxForm(account(id));break;
+    case 'join-shared':joinSharedAccountForm();break;
     case 'rule-edit':ruleForm(state.rules.find(r=>r.id===id));break;
     case 'rule-delete':deleteRuleForm(state.rules.find(r=>r.id===id));break;
     case 'payroll-edit':payrollForm(state.payrolls.find(p=>p.id===id));break;
@@ -672,4 +768,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.body.cl
 
 renderAll();
 
-if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});}else{document.querySelector('#welcome')?.remove();state=empty();ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}
+if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);if(sharedChannel)await client.removeChannel(sharedChannel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();await refreshShared(client,user.id);renderAll();channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});
+    // Segundo canal para cuentas compartidas (ver shared-accounts.js): cualquier cambio en
+    // estas 3 tablas — alguien agregó/editó/eliminó un movimiento compartido, se compartió
+    // o dejó de compartir una cuenta, o te uniste/te sacaron de una — refresca el caché y
+    // vuelve a dibujar, igual que el canal de arriba hace con tu propio documento.
+    sharedChannel=client.channel('shared-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_transactions'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_accounts'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_members'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).subscribe();}else{document.querySelector('#welcome')?.remove();state=empty();resetSharedCache();ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}

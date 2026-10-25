@@ -222,6 +222,24 @@
 //   segundo plano) se vuelve a renderizar con el orden ya corregido. Ver pruebas "...queda
 //   arriba de ... una vez convertida" y "...no rompe la app" (con la API de cotizaciones
 //   simulada y caída, respectivamente).
+// - 2026-10-25 (2): cuentas compartidas. Pedido: "que dos personas con cuenta propia puedan
+//   agregar movimientos a una cuenta, pero solamente pueda modificar los movimientos que ese
+//   usuario creó, y que la cuenta como tal viva en la sesión de uno de los usuarios solamente
+//   [...] compartir un código para que el otro usuario pueda linkearse a esa cuenta". Nuevo
+//   archivo shared-accounts.js (+ supabase-cuentas-compartidas.sql, hay que correrlo una vez
+//   en el SQL Editor de Supabase): el dueño comparte una cuenta con un código desde su
+//   formulario de edición ("Compartir esta cuenta"/"Dejar de compartir"); otra persona se une
+//   con ese código desde Ajustes → "Unirme con código". La cuenta sigue viviendo solo en el
+//   documento del dueño; los movimientos que agregue la persona invitada (solo gasto/ingreso
+//   directo, botón "＋ Agregar" dentro de la sección "Movimientos compartidos" del detalle de
+//   la cuenta) se guardan aparte, con quién los creó, para que cada quien solo pueda
+//   editar/eliminar los suyos (reforzado también por los permisos en Supabase, no solo en la
+//   interfaz). Alcance de v1: la persona invitada no ve el historial de antes de unirse (sí ve
+//   el saldo real, que incluye su parte); no se soportan transferencias/pagos/MSI compartidos,
+//   solo gasto/ingreso. Como esto depende de verdad de Supabase (no del modo demo que usan casi
+//   todas las pruebas de este archivo), se prueba simulando un cliente de Supabase falso con
+//   datos propios (mismo mecanismo que ya se usaba para "recuperar contraseña" más abajo) en
+//   vez de con el servidor de pruebas normal. Ver pruebas "Cuentas compartidas: ...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -230,6 +248,104 @@ const results = [];
 function check(name, cond, detail = '') {
   results.push({ name, pass: !!cond, detail });
 }
+
+// Cliente de Supabase falso y genérico (reusado por las pruebas de cuentas compartidas más
+// abajo): guarda sus "tablas" en memoria (seedDb + lo que se inserte durante la prueba) y
+// registra cada llamada en localStorage (clave '__testCalls') para poder revisar qué se
+// mandó a guardar. currentUserId es el id del usuario "con el que inicias sesión" en esa
+// página; bookPayload/bookRevision, si se dan, precargan finance_books como si ya existiera
+// (para no depender de que load() tenga que guardar algo al iniciar).
+function fakeSupabaseShared(currentUserId, seedDb, book) {
+  const seedJson = JSON.stringify(seedDb || {});
+  const bookJson = JSON.stringify(book || null);
+  const uidJson = JSON.stringify(currentUserId);
+  return `
+    window.supabase = {
+      createClient: function () {
+        const db = Object.assign({ finance_books: [], shared_accounts: [], shared_account_members: [], shared_account_transactions: [] }, ${seedJson});
+        const bookSeed = ${bookJson};
+        if (bookSeed) db.finance_books.push({ user_id: ${uidJson}, payload: bookSeed.payload, revision: bookSeed.revision });
+        let seq = 0;
+        function log(name, payload) {
+          try {
+            const arr = JSON.parse(localStorage.getItem('__testCalls') || '[]');
+            arr.push([name, payload]);
+            localStorage.setItem('__testCalls', JSON.stringify(arr));
+          } catch (e) {}
+        }
+        function matchOne(row, filters) { return filters.every((f) => f(row)); }
+        function builder(table) {
+          let filters = [];
+          let pendingInsert = null, pendingUpdate = null, pendingDelete = false;
+          const self = {
+            select: function () { return self; },
+            eq: function (col, val) { filters.push((r) => r[col] === val); return self; },
+            in: function (col, vals) { filters.push((r) => vals.includes(r[col])); return self; },
+            insert: function (row) { pendingInsert = Array.isArray(row) ? row : [row]; return self; },
+            update: function (patch) { pendingUpdate = patch; return self; },
+            delete: function () { pendingDelete = true; return self; },
+            maybeSingle: function () { return exec().then((res) => Object.assign({}, res, { data: (res.data && res.data[0]) || null })); },
+            single: function () { return exec().then((res) => Object.assign({}, res, { data: (res.data && res.data[0]) || null })); },
+            then: function (resolve, reject) { return exec().then(resolve, reject); },
+          };
+          function exec() {
+            log('from:' + table, { filters: filters.length, pendingInsert, pendingUpdate, pendingDelete });
+            if (pendingInsert) {
+              const rows = pendingInsert.map((r) => Object.assign({ id: table + '_' + ++seq, share_code: 'CODE' + seq, revoked: false }, r));
+              db[table].push.apply(db[table], rows);
+              return Promise.resolve({ data: rows, error: null });
+            }
+            if (pendingUpdate) {
+              const changed = [];
+              db[table] = db[table].map((r) => { if (matchOne(r, filters)) { const nr = Object.assign({}, r, pendingUpdate); changed.push(nr); return nr; } return r; });
+              return Promise.resolve({ data: changed, error: null });
+            }
+            if (pendingDelete) {
+              db[table] = db[table].filter((r) => !matchOne(r, filters));
+              return Promise.resolve({ data: null, error: null });
+            }
+            const rows = db[table].filter((r) => matchOne(r, filters));
+            return Promise.resolve({ data: rows, error: null });
+          }
+          return self;
+        }
+        return {
+          auth: {
+            onAuthStateChange: function (cb) {
+              window.__testEmit = function (event, session) { cb(event, session); };
+              setTimeout(function () { cb('SIGNED_IN', { user: { id: ${uidJson} } }); }, 0);
+            },
+            getSession: async function () { return { data: { session: { user: { id: ${uidJson} } } }, error: null }; },
+            refreshSession: async function () { return { data: { session: { user: { id: ${uidJson} } } }, error: null }; },
+            signOut: async function () { return { error: null }; },
+          },
+          from: builder,
+          rpc: async function (name, args) {
+            log('rpc:' + name, args);
+            if (name === 'save_finance_book') {
+              const rows = db.finance_books.filter((r) => r.user_id === ${uidJson});
+              if (rows.length) { rows[0].payload = args.p_payload; rows[0].revision = (rows[0].revision || 0) + 1; return { data: rows[0].revision, error: null }; }
+              db.finance_books.push({ user_id: ${uidJson}, payload: args.p_payload, revision: 1 });
+              return { data: 1, error: null };
+            }
+            if (name === 'join_shared_account') {
+              const code = String(args.p_code || '').trim().toLowerCase();
+              const row = db.shared_accounts.find((r) => String(r.share_code).toLowerCase() === code && !r.revoked);
+              if (!row) return { data: null, error: { message: 'CODIGO_INVALIDO' } };
+              if (row.owner_user_id === ${uidJson}) return { data: null, error: { message: 'ES_TU_PROPIA_CUENTA' } };
+              db.shared_account_members.push({ shared_account_id: row.id, user_id: ${uidJson} });
+              return { data: [{ id: row.id, owner_user_id: row.owner_user_id, account_id: row.account_id, name: row.name, type: row.type, currency: row.currency, color: row.color, base_balance: row.base_balance }], error: null };
+            }
+            return { data: null, error: null };
+          },
+          channel: function () { return { on: function () { return this; }, subscribe: function () { return this; } }; },
+          removeChannel: async function () {},
+        };
+      },
+    };
+  `;
+}
+const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; export const SUPABASE_PUBLISHABLE_KEY='fake-key';`;
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
@@ -1810,6 +1926,189 @@ function check(name, cond, detail = '') {
     );
 
     await fxFailPage.close();
+  }
+
+  // ---------- 2026-10-25 (2): cuentas compartidas — lado del dueño ----------
+  {
+    const TODAY = new Date().toISOString().slice(0, 10);
+    const ownerSeed = {
+      shared_accounts: [{ id: 'sa1', owner_user_id: 'owner-1', account_id: 'acc1', share_code: 'preset1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', color: 'auto', base_balance: 0, revoked: false }],
+      shared_account_members: [],
+      shared_account_transactions: [{ id: 'tx1', shared_account_id: 'sa1', creator_user_id: 'guest-9', kind: 'income', amount: 200000, concept: 'Depósito de X', category: '', date: TODAY }],
+    };
+    const ownerBook = { payload: { accounts: [
+      { id: 'acc1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', opening: 500000, asOf: '2026-01-01', available: true, archived: false },
+      { id: 'acc2', name: 'Cuenta sin compartir', type: 'debit', currency: 'MXN', opening: 100000, asOf: '2026-01-01', available: true, archived: false },
+    ], transactions: [], rules: [], goals: [] }, revision: 1 };
+
+    const ownerPage = await context.newPage();
+    await ownerPage.route('**/config.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: FAKE_CONFIG }));
+    await ownerPage.route('**/vendor/supabase.umd.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: fakeSupabaseShared('owner-1', ownerSeed, ownerBook) }));
+    await ownerPage.goto(BASE, { waitUntil: 'networkidle' });
+    await ownerPage.waitForTimeout(900);
+    const tapO2 = (sel) => ownerPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+    const textO2 = (sel) => ownerPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const callsO = () => ownerPage.evaluate(() => JSON.parse(localStorage.getItem('__testCalls') || '[]'));
+
+    // Cuenta SIN compartir todavía: el formulario debe ofrecer "Compartir esta cuenta".
+    await tapO2('.tabbar [data-tab="ajustes"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('[data-action="account-edit"][data-id="acc2"]');
+    await ownerPage.waitForTimeout(400);
+    check(
+      'Cuentas compartidas: una cuenta sin compartir muestra el botón "Compartir esta cuenta" (no "Compartida")',
+      (await ownerPage.evaluate(() => !!document.querySelector('#share-account'))) && !(await ownerPage.evaluate(() => !!document.querySelector('#unshare-account')))
+    );
+    await tapO2('#share-account');
+    await ownerPage.waitForTimeout(500);
+    check(
+      'Cuentas compartidas: al compartirla, se guarda en shared_accounts con el id de la cuenta y el usuario dueño, y se muestra el código',
+      /Compartida · código\s+CODE1/.test((await textO2('#fields')) || ''),
+      await textO2('#fields')
+    );
+    await tapO2('#unshare-account');
+    await ownerPage.waitForTimeout(500);
+    check(
+      'Cuentas compartidas: "Dejar de compartir" quita el código y vuelve a ofrecer "Compartir esta cuenta"',
+      (await ownerPage.evaluate(() => !!document.querySelector('#share-account'))) && !(await ownerPage.evaluate(() => !!document.querySelector('#unshare-account')))
+    );
+    await ownerPage.keyboard.press('Escape');
+    await ownerPage.waitForTimeout(300);
+
+    // Cuenta YA compartida (acc1, sembrada con un movimiento compartido de "guest-9"): el
+    // saldo debe incluir ese movimiento, y no debe poder editarse/eliminarse (no es suyo).
+    await tapO2('.tabbar [data-tab="insights"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('.wallet[data-id="acc1"]');
+    await ownerPage.waitForTimeout(500);
+    const saldoTexto = await ownerPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
+    check(
+      'Cuentas compartidas: el saldo del dueño incluye lo agregado por la persona invitada ($5,000 + $2,000 = $7,000.00)',
+      saldoTexto === '$7,000.00',
+      saldoTexto
+    );
+    const otherRowReadonly = await ownerPage.evaluate(() => {
+      const h2s = [...document.querySelectorAll('#push-content h2')];
+      const h2 = h2s.find((x) => x.textContent.trim() === 'Movimientos compartidos');
+      const card = h2 ? h2.closest('.card') : null;
+      const row = card ? [...card.querySelectorAll('.t1')].find((e) => e.textContent.trim() === 'Depósito de X') : null;
+      return row ? !row.closest('.swipe-row') : null;
+    });
+    check(
+      'Cuentas compartidas: un movimiento agregado por la otra persona se ve, pero sin opción de editar/eliminar (no es del dueño)',
+      otherRowReadonly === true,
+      String(otherRowReadonly)
+    );
+
+    // El dueño agrega su propio movimiento compartido: debe quedar con su propio creator_user_id.
+    await tapO2('[data-action="add-shared-tx"]');
+    await ownerPage.waitForTimeout(400);
+    await ownerPage.selectOption('[name=kind]', 'expense');
+    await ownerPage.fill('[name=concept]', 'Café compartido');
+    await ownerPage.fill('input[aria-label="Importe"]', '300');
+    await ownerPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await tapO2('#save');
+    await ownerPage.waitForTimeout(600);
+    const insertCalls = (await callsO()).filter((c) => c[0] === 'from:shared_account_transactions' && c[1]?.pendingInsert);
+    const myInsert = insertCalls.flatMap((c) => c[1].pendingInsert).find((r) => r.concept === 'Café compartido');
+    check(
+      'Cuentas compartidas: el movimiento que agrega el dueño se guarda con su propio creator_user_id (no el de la cuenta)',
+      myInsert?.creator_user_id === 'owner-1' && myInsert?.kind === 'expense' && myInsert?.amount === 30000,
+      JSON.stringify(myInsert)
+    );
+    const saldoTrasGasto = await ownerPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
+    check(
+      'Cuentas compartidas: el saldo baja de inmediato con el nuevo movimiento ($7,000 − $300 = $6,700.00)',
+      saldoTrasGasto === '$6,700.00',
+      saldoTrasGasto
+    );
+    const myRowEditable = await ownerPage.evaluate(() => {
+      const h2s = [...document.querySelectorAll('#push-content h2')];
+      const h2 = h2s.find((x) => x.textContent.trim() === 'Movimientos compartidos');
+      const card = h2 ? h2.closest('.card') : null;
+      const row = card ? [...card.querySelectorAll('.t1')].find((e) => e.textContent.trim() === 'Café compartido') : null;
+      return row ? !!row.closest('.swipe-row') : null;
+    });
+    check(
+      'Cuentas compartidas: el movimiento que SÍ creó el dueño se puede eliminar/editar (aparece como swipe-row)',
+      myRowEditable === true,
+      String(myRowEditable)
+    );
+    await ownerPage.close();
+  }
+
+  // ---------- 2026-10-25 (2): cuentas compartidas — lado de la persona invitada ----------
+  {
+    const guestSeed = {
+      shared_accounts: [{ id: 'sa2', owner_user_id: 'owner-7', account_id: 'accX', share_code: 'joincode', name: 'Ahorro compartido', type: 'saving', currency: 'MXN', color: 'auto', base_balance: 500000, revoked: false }],
+      shared_account_members: [],
+      shared_account_transactions: [],
+    };
+    const guestBook = { payload: { accounts: [], transactions: [], rules: [], goals: [] }, revision: 1 };
+
+    const guestPage = await context.newPage();
+    await guestPage.route('**/config.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: FAKE_CONFIG }));
+    await guestPage.route('**/vendor/supabase.umd.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: fakeSupabaseShared('guest-9', guestSeed, guestBook) }));
+    await guestPage.goto(BASE, { waitUntil: 'networkidle' });
+    await guestPage.waitForTimeout(900);
+    const tapG = (sel) => guestPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+    const textG = (sel) => guestPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const callsG = () => guestPage.evaluate(() => JSON.parse(localStorage.getItem('__testCalls') || '[]'));
+
+    await tapG('.tabbar [data-tab="ajustes"]');
+    await guestPage.waitForTimeout(400);
+    check(
+      'Cuentas compartidas: Ajustes ofrece "Unirme con código" con sesión activa, y antes de unirte la cuenta de otra persona no aparece',
+      (await guestPage.evaluate(() => !!document.querySelector('[data-action="join-shared"]'))) &&
+        !(await guestPage.evaluate(() => [...document.querySelectorAll('.wn')].some((n) => n.textContent.trim() === 'Ahorro compartido')))
+    );
+
+    // Código inválido: debe rechazarse sin agregar nada.
+    await tapG('[data-action="join-shared"]');
+    await guestPage.waitForTimeout(400);
+    await guestPage.fill('[name=code]', 'nope');
+    await tapG('#save');
+    await guestPage.waitForTimeout(400);
+    check('Cuentas compartidas: un código que no existe se rechaza con un mensaje claro', /no es válido/i.test((await textG('#error')) || ''), await textG('#error'));
+    await guestPage.fill('[name=code]', 'JOINCODE');
+    await tapG('#save');
+    await guestPage.waitForTimeout(600);
+    const joinedNow = await guestPage.evaluate(() => [...document.querySelectorAll('.wn')].some((n) => n.textContent.trim() === 'Ahorro compartido'));
+    check('Cuentas compartidas: con el código correcto (sin importar mayúsculas), la cuenta de la otra persona aparece en tu lista', joinedNow);
+
+    await tapG('.tabbar [data-tab="ajustes"]');
+    await guestPage.waitForTimeout(400);
+    await tapG('[data-action="account"][data-id^="shared:"]');
+    await guestPage.waitForTimeout(500);
+    const hasEditBtn = await guestPage.evaluate(() => !!document.querySelector('[data-action="account-edit"]'));
+    check('Cuentas compartidas: la persona invitada NO ve el botón "Editar cuenta" (no es su cuenta)', !hasEditBtn);
+    const saldoGuest = await guestPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
+    check('Cuentas compartidas: la persona invitada ve el saldo real sincronizado por el dueño ($5,000.00), sin ver historial previo', saldoGuest === '$5,000.00', saldoGuest);
+    check(
+      'Cuentas compartidas: sin movimientos compartidos todavía, se muestra el mensaje vacío correspondiente',
+      /Nadie ha agregado movimientos compartidos todavía/.test((await textG('#push-content')) || '')
+    );
+
+    await tapG('[data-action="add-shared-tx"]');
+    await guestPage.waitForTimeout(400);
+    await guestPage.selectOption('[name=kind]', 'expense');
+    await guestPage.fill('[name=concept]', 'Refresco');
+    await guestPage.fill('input[aria-label="Importe"]', '50');
+    await guestPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await tapG('#save');
+    await guestPage.waitForTimeout(600);
+    const guestInsert = (await callsG())
+      .filter((c) => c[0] === 'from:shared_account_transactions' && c[1]?.pendingInsert)
+      .flatMap((c) => c[1].pendingInsert)
+      .find((r) => r.concept === 'Refresco');
+    check(
+      'Cuentas compartidas: el movimiento que agrega la persona invitada queda con SU propio creator_user_id',
+      guestInsert?.creator_user_id === 'guest-9' && guestInsert?.shared_account_id === 'sa2',
+      JSON.stringify(guestInsert)
+    );
+    const saldoGuestTrasGasto = await guestPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
+    check('Cuentas compartidas: el saldo de la persona invitada también baja de inmediato ($5,000 − $50 = $4,950.00)', saldoGuestTrasGasto === '$4,950.00', saldoGuestTrasGasto);
+    await guestPage.close();
   }
 
   await browser.close();
