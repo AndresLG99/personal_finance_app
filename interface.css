@@ -83,7 +83,43 @@ h3{margin:0;font-size:17px;font-weight:600}
 .wallet .wn{font-size:13px;font-weight:600;opacity:.88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet .wv{font-size:20px;font-weight:700}
 .wallet .ws{font-size:12px;opacity:.85}
-.w-blue{background:#1F3A8A}.w-silver{background:#4B5563}.w-pink{background:#9E2A63}.w-gold{background:#7A5C0F}.w-purple{background:#5B2A9E}.w-red{background:#7A2416}.w-green{background:#14523F}.w-teal{background:#0F5560}.w-slate{background:#2B2F3A}
+/* Colores de tarjeta (2026-10-24): cada uno con degradado de 3 paradas (clara/base/oscura
+   de la misma tonalidad) para dar sensación de profundidad, en vez del color plano de antes.
+   La parada "base" (52%) es el mismo color que ya existía para cada clave, así que una
+   cuenta ya guardada con un color de la lista original se sigue viendo con la misma
+   identidad de color, ahora con brillo. */
+.w-blue{background:linear-gradient(135deg,#365AC5 0%,#1F3A8A 52%,#112255 100%)}
+.w-silver{background:linear-gradient(135deg,#707D90 0%,#4B5563 52%,#2E353E 100%)}
+.w-pink{background:linear-gradient(135deg,#C8518C 0%,#9E2A63 52%,#6C1A42 100%)}
+.w-gold{background:linear-gradient(135deg,#BA8F20 0%,#7A5C0F 52%,#403006 100%)}
+.w-purple{background:linear-gradient(135deg,#8451C8 0%,#5B2A9E 52%,#3D1A6C 100%)}
+.w-red{background:linear-gradient(135deg,#B73E2A 0%,#7A2416 52%,#43120B 100%)}
+.w-green{background:linear-gradient(135deg,#2A8E6F 0%,#14523F 52%,#061D16 100%)}
+.w-teal{background:linear-gradient(135deg,#218EA0 0%,#0F5560 52%,#052327 100%)}
+.w-slate{background:linear-gradient(135deg,#4F5668 0%,#2B2F3A 52%,#0F1014 100%)}
+.w-orange{background:linear-gradient(135deg,#B76A34 0%,#7C451D 52%,#48270F 100%)}
+.w-mustard{background:linear-gradient(135deg,#A89E39 0%,#6F6820 52%,#3C3910 100%)}
+.w-lime{background:linear-gradient(135deg,#699E43 0%,#426827 52%,#233814 100%)}
+.w-emerald{background:linear-gradient(135deg,#36A059 0%,#1E6736 52%,#0E341B 100%)}
+.w-cyan{background:linear-gradient(135deg,#3697A0 0%,#1E6167 52%,#0E3134 100%)}
+.w-skyblue{background:linear-gradient(135deg,#3F87BB 0%,#265C82 52%,#163850 100%)}
+.w-indigo{background:linear-gradient(135deg,#574EBC 0%,#362E8A 52%,#211C59 100%)}
+.w-violet{background:linear-gradient(135deg,#9855BE 0%,#6E3091 52%,#491E61 100%)}
+.w-magenta{background:linear-gradient(135deg,#B545B1 0%,#7E2A7B 52%,#4E184C 100%)}
+.w-fuchsia{background:linear-gradient(135deg,#BB3F8D 0%,#822660 52%,#50163B 100%)}
+.w-crimson{background:linear-gradient(135deg,#AF3B4F 0%,#772230 52%,#44121B 100%)}
+/* Selector visual de color (estilo Excel): botón "Automático" + cuadrícula de muestras. */
+.color-field{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.color-field-label{font-size:13px;color:var(--muted);font-weight:600}
+.color-auto-btn{align-self:flex-start;display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:12px;border:1px solid #FFFFFF26;background:#FFFFFF0F;color:#fff;font-size:14px;font-weight:600;min-height:40px}
+.color-auto-btn .small{font-weight:400;opacity:.7;font-size:12px}
+.color-auto-btn[aria-pressed=true]{border-color:var(--accent);background:#FFFFFF1E}
+.color-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:10px;border-radius:14px;background:#00000026;border:1px solid #FFFFFF14}
+.color-swatch{width:100%;aspect-ratio:1;min-height:32px;border-radius:8px;border:1px solid #FFFFFF2E;box-shadow:inset 0 1px 0 #FFFFFF30;display:flex;align-items:center;justify-content:center;padding:0}
+.color-swatch .color-check{opacity:0;transform:scale(.6);transition:opacity .12s,transform .12s}
+.color-swatch[aria-pressed=true]{outline:2px solid #fff;outline-offset:2px}
+.color-swatch[aria-pressed=true] .color-check{opacity:1;transform:scale(1)}
+@media (min-width:860px) and (hover:hover) and (pointer:fine){.color-swatch:hover{filter:brightness(1.12)}}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
 .cal .wd{text-align:center;font-size:13px;font-weight:600;color:var(--muted);padding-bottom:4px}
 .cal button{height:48px;border-radius:15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:16px;font-weight:500;transition:background .25s ease,color .25s ease,transform .18s}

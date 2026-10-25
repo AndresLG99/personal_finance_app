@@ -184,6 +184,24 @@
 //      asociadas (para no perder ese historial ni dejar referencias rotas) y en ese caso
 //      ofrecen archivarla en su lugar; sin ninguna referencia, se elimina de verdad. Ver
 //      pruebas "Eliminar una cuenta CON movimientos..." y "...SIN referencias...".
+// - 2026-10-24 (2): lote de 2 pedidos juntos.
+//   1) Más colores para las tarjetas de cuenta (de 9 a 20, sin renombrar los que ya existían,
+//      para no romper cuentas ya guardadas) con un selector visual estilo el de Excel —
+//      colorField()/bindColorField() en app.js reemplazan el <select> de texto por un botón
+//      "Automático" + una cuadrícula de muestras — y cada color se pinta con un degradado de
+//      3 paradas (clara/base/oscura) en vez de un color plano, para dar sensación de
+//      profundidad (ver las clases .w-* en interface.css). Ver pruebas "...cuadrícula con al
+//      menos 15 colores..." y las demás del mismo bloque.
+//   2) En todas las vistas donde aparecen las tarjetas de cuenta (Insights → "Explorar mis
+//      cuentas", Calendario → "Saldos", Ajustes → "Mis cuentas"), dentro de cada división ya
+//      existente (Líquido/Deudas/Por cobrar) las tarjetas ahora se agrupan por el color de la
+//      tarjeta y se ordenan de mayor a menor monto (en valor absoluto): primero los grupos de
+//      color con más monto acumulado, y dentro de cada color, la cuenta de mayor monto
+//      primero. accountGroupSections() en account-groups.js recibe ahora una función
+//      amountFor(a) (cardAmount() en app.js, compartida con walletCard() para usar siempre el
+//      mismo número) y hace el agrupado/orden antes de repartir cada división en divs. Ver
+//      pruebas "...se agrupan por color y se ordenan de mayor a menor monto" (una por cada
+//      vista).
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -1537,6 +1555,136 @@ function check(name, cond, detail = '') {
       check('Tras confirmar, la cuenta sin referencias se elimina de verdad (ya no aparece en Ajustes)', !stillExists);
     }
     await delPage.close();
+  }
+
+  // ---------- Lote 2026-10-24 (2), punto 1: selector de color estilo Excel, con degradado ----------
+  // Pedido: más opciones de color para las tarjetas, con un selector visual tipo el de Excel
+  // (cuadrícula de muestras) en vez del <select> de texto que había, y que el color elegido
+  // se vea con un degradado para dar sensación de profundidad. colorField()/bindColorField()
+  // en app.js reemplazan el <select name=color> por un botón "Automático" + una cuadrícula de
+  // muestras (una por cada color de walletColors, excepto "auto"); cada una usa la clase
+  // w-<color>, cuyo fondo en interface.css ahora es un linear-gradient de 3 paradas (clara/
+  // base/oscura) en vez de un color plano.
+  {
+    const colorPage = await context.newPage();
+    await colorPage.goto(BASE, { waitUntil: 'networkidle' });
+    await colorPage.waitForTimeout(700);
+    const tapC = (sel) => colorPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+    const existsC = (sel) => colorPage.evaluate((s) => !!document.querySelector(s), sel);
+    const textC = (sel) => colorPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+
+    await tapC('.tabbar [data-tab="ajustes"]');
+    await colorPage.waitForTimeout(300);
+    await tapC('[data-action="account-edit"][data-id="credit"]');
+    await colorPage.waitForTimeout(400);
+
+    const swatchCount = await colorPage.evaluate(() => document.querySelectorAll('.color-swatch').length);
+    check(
+      'El formulario de cuenta ya no usa un <select> de texto para el color: muestra una cuadrícula con al menos 15 colores',
+      !(await existsC('select[name=color]')) && swatchCount >= 15,
+      'select[name=color] existe: ' + (await existsC('select[name=color]')) + ', muestras: ' + swatchCount
+    );
+    check('El selector de color incluye el botón "Automático" (color según el nombre del banco)', await existsC('.color-auto-btn'));
+
+    check(
+      'Cada muestra de color se pinta con un degradado de varias paradas (no un color plano), para dar sensación de profundidad',
+      await colorPage.evaluate(() => {
+        const bg = getComputedStyle(document.querySelector('.color-swatch[data-color=emerald]')).backgroundImage;
+        return bg.startsWith('linear-gradient') && (bg.match(/rgb\(/g) || []).length >= 3;
+      })
+    );
+
+    await tapC('.color-swatch[data-color=emerald]');
+    await colorPage.waitForTimeout(100);
+    check(
+      'Elegir una muestra actualiza el valor guardado (campo oculto) y marca esa muestra como seleccionada',
+      (await colorPage.evaluate(() => document.querySelector('input[name=color]')?.value)) === 'emerald' &&
+        (await colorPage.evaluate(() => document.querySelector('.color-swatch[data-color=emerald]')?.getAttribute('aria-pressed'))) === 'true' &&
+        (await colorPage.evaluate(() => document.querySelector('.color-auto-btn')?.getAttribute('aria-pressed'))) === 'false'
+    );
+    await tapC('#save');
+    await colorPage.waitForTimeout(400);
+    check(
+      'Guardar el color elegido se refleja en la tarjeta de la cuenta (clase w-emerald)',
+      (await colorPage.evaluate(() => document.querySelector('[data-action="account-edit"][data-id="credit"]')?.className)) === 'wallet w-emerald',
+      await textC('#error')
+    );
+    await colorPage.close();
+  }
+
+  // ---------- Lote 2026-10-24 (2), punto 2: las cards de cuentas se agrupan por color y se ordenan por monto ----------
+  // Pedido: en todas las secciones donde aparecen las tarjetas de cuenta, agruparlas por el
+  // color de la tarjeta y ordenarlas de mayor a menor monto en valor absoluto. Dentro de cada
+  // división (Líquido/Deudas/Por cobrar) ya existente, accountGroupSections() ahora agrupa por
+  // walletTheme(a) y ordena los grupos de color por la suma de montos (de mayor a menor), y
+  // dentro de cada color, cada cuenta por su propio monto (de mayor a menor). Se verifica con 3
+  // cuentas de prueba (2 del mismo color con distinto monto, 1 de otro color) en las 3 vistas
+  // donde se listan las tarjetas de cuenta: Ajustes, Insights y Calendario.
+  {
+    const orderPage = await context.newPage();
+    await orderPage.goto(BASE, { waitUntil: 'networkidle' });
+    await orderPage.waitForTimeout(700);
+    const tapO = (sel) => orderPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+
+    const createDebitAccount = async (name, color, opening) => {
+      await tapO('.tabbar [data-tab="ajustes"]');
+      await orderPage.waitForTimeout(300);
+      await tapO('#add-account');
+      await orderPage.waitForTimeout(400);
+      await orderPage.fill('[name=name]', name);
+      await orderPage.selectOption('[name=type]', 'debit');
+      await tapO(`.color-swatch[data-color=${color}]`);
+      await orderPage.fill('input[aria-label="Saldo inicial (negativo si debes)"]', String(opening));
+      await orderPage.evaluate(() => document.querySelector('input[aria-label="Saldo inicial (negativo si debes)"]').blur());
+      await tapO('#save');
+      await orderPage.waitForTimeout(400);
+    };
+    // Cuenta de ejemplo "bank" (slate, saldo ~$23,155) y "cash" (green, $1,200) ya existen.
+    // Se agregan 3 más, todas de tipo débito (misma división "Líquido"): dos azules (montos
+    // distintos) y una roja (el mayor monto de las 3 nuevas).
+    await createDebitAccount('Acc1 azul chica', 'blue', 500);
+    await createDebitAccount('Acc2 azul grande', 'blue', 2000);
+    await createDebitAccount('Acc3 roja', 'red', 3000);
+
+    // Orden esperado en "Líquido": bank (slate, ~23,155: el mayor de todos) > Acc3 (red, 3000:
+    // el grupo de color con más monto entre las 3 nuevas) > Acc2 (blue, 2000: el mayor de su
+    // grupo) > Acc1 (blue, 500) > cash (green, 1200: el grupo de color con menos monto).
+    const expectedOrder = ['Cuenta principal · ejemplo', 'Acc3 roja', 'Acc2 azul grande', 'Acc1 azul chica', 'Efectivo · ejemplo'];
+    const liquidoNames = (containerSel) =>
+      orderPage.evaluate((sel) => {
+        const groups = [...document.querySelectorAll(sel + ' .account-group')];
+        const liquido = groups.find((g) => g.querySelector('.account-group-label')?.textContent.trim() === 'Líquido');
+        return liquido ? [...liquido.querySelectorAll('.wallet .wn')].map((n) => n.textContent.trim()) : null;
+      }, containerSel);
+
+    await tapO('.tabbar [data-tab="ajustes"]');
+    await orderPage.waitForTimeout(400);
+    const ajustesOrder = await liquidoNames('#s-ajustes');
+    check(
+      'Ajustes → "Mis cuentas": dentro de Líquido, las tarjetas se agrupan por color y se ordenan de mayor a menor monto',
+      JSON.stringify(ajustesOrder) === JSON.stringify(expectedOrder),
+      JSON.stringify(ajustesOrder)
+    );
+
+    await tapO('.tabbar [data-tab="insights"]');
+    await orderPage.waitForTimeout(400);
+    const insightsOrder = await liquidoNames('#s-insights');
+    check(
+      'Insights → "Explorar mis cuentas": el mismo orden (agrupado por color, de mayor a menor monto)',
+      JSON.stringify(insightsOrder) === JSON.stringify(expectedOrder),
+      JSON.stringify(insightsOrder)
+    );
+
+    await tapO('.tabbar [data-tab="calendario"]');
+    await orderPage.waitForTimeout(400);
+    const calendarioOrder = await liquidoNames('#s-calendario');
+    check(
+      'Calendario → "Saldos": el mismo orden (agrupado por color, de mayor a menor monto)',
+      JSON.stringify(calendarioOrder) === JSON.stringify(expectedOrder),
+      JSON.stringify(calendarioOrder)
+    );
+
+    await orderPage.close();
   }
 
   await browser.close();
