@@ -202,6 +202,14 @@
 //      mismo número) y hace el agrupado/orden antes de repartir cada división en divs. Ver
 //      pruebas "...se agrupan por color y se ordenan de mayor a menor monto" (una por cada
 //      vista).
+// - 2026-10-24 (3): el usuario pidió quitar la agrupación por color del punto 2 de arriba
+//   (2026-10-24 (2)) y dejar solo el orden por monto, que le parece más simple y conveniente.
+//   accountGroupSections() en account-groups.js ya no agrupa por walletTheme(a): dentro de
+//   cada división, sortByAmount() solo ordena las cuentas por su propio monto (de mayor a
+//   menor), sin importar el color de cada una. Se reescribieron las 3 pruebas del punto 2 de
+//   arriba para reflejar el nuevo orden esperado (con cuentas de colores intercalados a
+//   propósito, para que una agrupación por color accidental sí se note). Ver pruebas
+//   "...se ordenan de mayor a menor monto (sin agrupar por color)" (una por cada vista).
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -1612,14 +1620,16 @@ function check(name, cond, detail = '') {
     await colorPage.close();
   }
 
-  // ---------- Lote 2026-10-24 (2), punto 2: las cards de cuentas se agrupan por color y se ordenan por monto ----------
-  // Pedido: en todas las secciones donde aparecen las tarjetas de cuenta, agruparlas por el
-  // color de la tarjeta y ordenarlas de mayor a menor monto en valor absoluto. Dentro de cada
-  // división (Líquido/Deudas/Por cobrar) ya existente, accountGroupSections() ahora agrupa por
-  // walletTheme(a) y ordena los grupos de color por la suma de montos (de mayor a menor), y
-  // dentro de cada color, cada cuenta por su propio monto (de mayor a menor). Se verifica con 3
-  // cuentas de prueba (2 del mismo color con distinto monto, 1 de otro color) en las 3 vistas
-  // donde se listan las tarjetas de cuenta: Ajustes, Insights y Calendario.
+  // ---------- Lote 2026-10-24 (2), punto 2: las cards de cuentas se ordenan por monto (sin agrupar por color) ----------
+  // Pedido original: en todas las secciones donde aparecen las tarjetas de cuenta, ordenarlas
+  // de mayor a menor monto en valor absoluto. Primero se agregó además una agrupación por
+  // color de tarjeta dentro de cada división; el usuario pidió quitar esa agrupación y dejar
+  // solo el orden por monto (más simple). accountGroupSections() ya no agrupa por
+  // walletTheme(a): dentro de cada división (Líquido/Deudas/Por cobrar), sortByAmount() en
+  // account-groups.js solo ordena las cuentas por su propio monto, de mayor a menor, sin
+  // importar el color de cada una. Se verifica con 3 cuentas de prueba de distinto color y
+  // monto en las 3 vistas donde se listan las tarjetas de cuenta: Ajustes, Insights y
+  // Calendario.
   {
     const orderPage = await context.newPage();
     await orderPage.goto(BASE, { waitUntil: 'networkidle' });
@@ -1639,17 +1649,19 @@ function check(name, cond, detail = '') {
       await tapO('#save');
       await orderPage.waitForTimeout(400);
     };
-    // Cuenta de ejemplo "bank" (slate, saldo ~$23,155) y "cash" (green, $1,200) ya existen.
-    // Se agregan 3 más, todas de tipo débito (misma división "Líquido"): dos azules (montos
-    // distintos) y una roja (el mayor monto de las 3 nuevas).
+    // Cuenta de ejemplo "bank" (saldo ~$23,155) y "cash" ($1,200) ya existen. Se agregan 3 más,
+    // todas de tipo débito (misma división "Líquido"), con colores distintos a propósito: si
+    // el código agrupara por color por error, Acc1/Acc2 (ambas azules) quedarían juntas aunque
+    // su monto no sea el más cercano; el orden correcto por monto puro las separa.
     await createDebitAccount('Acc1 azul chica', 'blue', 500);
     await createDebitAccount('Acc2 azul grande', 'blue', 2000);
     await createDebitAccount('Acc3 roja', 'red', 3000);
 
-    // Orden esperado en "Líquido": bank (slate, ~23,155: el mayor de todos) > Acc3 (red, 3000:
-    // el grupo de color con más monto entre las 3 nuevas) > Acc2 (blue, 2000: el mayor de su
-    // grupo) > Acc1 (blue, 500) > cash (green, 1200: el grupo de color con menos monto).
-    const expectedOrder = ['Cuenta principal · ejemplo', 'Acc3 roja', 'Acc2 azul grande', 'Acc1 azul chica', 'Efectivo · ejemplo'];
+    // Orden esperado en "Líquido", solo por monto (de mayor a menor), SIN agrupar por color:
+    // bank (~23,155) > Acc3 (3000) > Acc2 (2000) > cash (1200) > Acc1 (500). Nótese que cash
+    // queda entre Acc2 y Acc1 — si hubiera agrupación por color, cash (verde) no podría
+    // meterse entre las dos cuentas azules.
+    const expectedOrder = ['Cuenta principal · ejemplo', 'Acc3 roja', 'Acc2 azul grande', 'Efectivo · ejemplo', 'Acc1 azul chica'];
     const liquidoNames = (containerSel) =>
       orderPage.evaluate((sel) => {
         const groups = [...document.querySelectorAll(sel + ' .account-group')];
@@ -1661,7 +1673,7 @@ function check(name, cond, detail = '') {
     await orderPage.waitForTimeout(400);
     const ajustesOrder = await liquidoNames('#s-ajustes');
     check(
-      'Ajustes → "Mis cuentas": dentro de Líquido, las tarjetas se agrupan por color y se ordenan de mayor a menor monto',
+      'Ajustes → "Mis cuentas": dentro de Líquido, las tarjetas se ordenan de mayor a menor monto (sin agrupar por color)',
       JSON.stringify(ajustesOrder) === JSON.stringify(expectedOrder),
       JSON.stringify(ajustesOrder)
     );
@@ -1670,7 +1682,7 @@ function check(name, cond, detail = '') {
     await orderPage.waitForTimeout(400);
     const insightsOrder = await liquidoNames('#s-insights');
     check(
-      'Insights → "Explorar mis cuentas": el mismo orden (agrupado por color, de mayor a menor monto)',
+      'Insights → "Explorar mis cuentas": el mismo orden (solo por monto, sin agrupar por color)',
       JSON.stringify(insightsOrder) === JSON.stringify(expectedOrder),
       JSON.stringify(insightsOrder)
     );
@@ -1679,7 +1691,7 @@ function check(name, cond, detail = '') {
     await orderPage.waitForTimeout(400);
     const calendarioOrder = await liquidoNames('#s-calendario');
     check(
-      'Calendario → "Saldos": el mismo orden (agrupado por color, de mayor a menor monto)',
+      'Calendario → "Saldos": el mismo orden (solo por monto, sin agrupar por color)',
       JSON.stringify(calendarioOrder) === JSON.stringify(expectedOrder),
       JSON.stringify(calendarioOrder)
     );
