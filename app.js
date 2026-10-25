@@ -4,7 +4,7 @@ import {activityLists,chronological,stampTransactions} from './activity.js?v=202
 import {needsWelcome,openWelcome} from './onboarding.js?v=20260924-1';
 import {orderedAccounts,accountGroupSections} from './account-groups.js?v=20261024-1';
 import {swipeRow,iconButton,passwordToggles} from './transaction-actions.js?v=20261019-1';
-import {crossCurrency,refreshPending,exchangeFields,bindExchange} from './exchange.js?v=20260915-3';
+import {crossCurrency,refreshPending,exchangeFields,bindExchange,quote} from './exchange.js?v=20260915-3';
 import {accountHistory,payoff,duplicateDraft} from './insights.js?v=20260924-2';
 import {enhanceMoneyInputs} from './money-input.js?v=20260922-1';
 import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
@@ -58,6 +58,26 @@ async function mutate(fn){if(busy)return;busy=true;try{const next=structuredClon
 let exchangeRefreshAt=0,exchangeRefreshing=false;
 async function refreshExchange(){if(exchangeRefreshing||Date.now()-exchangeRefreshAt<3600000||!state.transactions.some(t=>t.status==='pending'&&crossCurrency(t,state.accounts)))return;exchangeRefreshing=true;const original=state;try{const result=await refreshPending(original);if(state===original){state=result.state;exchangeRefreshAt=Date.now()-(result.failures?3300000:0);renderAll();if(result.failures)notify('No se actualizaron algunas conversiones. Se conservan las últimas estimaciones; revisa la conexión.');}}finally{exchangeRefreshing=false;}}
 setInterval(refreshExchange,60000);window.addEventListener('focus',()=>refreshExchange());
+
+// Para ordenar las tarjetas de cuenta por monto (de mayor a menor) entre cuentas de distinta
+// moneda de forma justa: comparar los números tal cual (p. ej. $500 CAD contra $23,000 MXN)
+// hace que una cuenta en una moneda "fuerte" como CAD se vea artificialmente pequeña y quede
+// muy abajo, aunque convertida valga más que cuentas en MXN con un número mayor. Se convierte
+// a MXN (la moneda de referencia de la app: locale es-MX, categorías en español, cuentas de
+// ejemplo en MXN) solo para decidir el ORDEN — el monto que se muestra en cada tarjeta sigue
+// en su propia moneda, sin cambios. La tasa se consulta de forma perezosa (igual que
+// refreshExchange, arriba) y se cachea 1h; mientras no haya tasa disponible para una moneda,
+// se usa el monto sin convertir para esa cuenta en vez de bloquear el orden.
+const SORT_REF_CURRENCY='MXN',sortFxCache=new Map(),sortFxFetching=new Set();
+function sortRate(cur){
+ if(cur===SORT_REF_CURRENCY)return 1;
+ const hit=sortFxCache.get(cur);
+ if(!hit||Date.now()-hit.time>=3600000){
+  if(!sortFxFetching.has(cur)){sortFxFetching.add(cur);quote(cur,SORT_REF_CURRENCY).then(q=>{sortFxCache.set(cur,{rate:q.rate,time:Date.now()});renderAll();}).catch(()=>{}).finally(()=>sortFxFetching.delete(cur));}
+ }
+ return hit?hit.rate:null;
+}
+const sortAmount=(a,amt)=>{const r=sortRate(a.currency);return r==null?amt:amt*r;};
 
 /* ========================================================================
    Cálculos de presentación (derivados de state; ninguna lógica de datos nueva)
@@ -171,7 +191,7 @@ function vInsights(){
   </div>
   ${overdue?`<button type="button" class="banner" data-action="overdue" style="border-color:#FFCF6A55;background:#241C10;width:100%;text-align:left;cursor:pointer"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><span class="btn sm" aria-hidden="true">Revisar</span></button>`:''}
   ${hoyHtml?`<div class="row2 even">${proximosHtml}${hoyHtml}</div>`:proximosHtml}
-  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleAccounts(state,active()),a=>walletCard(a),a=>cardAmount(a,today(),false))}</div>`;
+  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleAccounts(state,active()),a=>walletCard(a),a=>sortAmount(a,cardAmount(a,today(),false)))}</div>`;
 }
 
 function vMovimientos(){
@@ -217,7 +237,7 @@ function vCalendario(){
     <div class="card tight"><span class="label">Gasto diario prom.</span><span class="mid num">${daily?fmt0(daily,cur):'—'}</span><span class="small">${lasts===null?'sin gastos aún':'te alcanza '+lasts+' días'}</span></div>
   </div>
   <div class="row-between" style="padding:0 4px;align-items:baseline"><h2>Saldos · ${dayLabel(sel).toLowerCase()==='hoy'?'hoy':dayLabel(sel).toLowerCase()}</h2><span class="small">${proj?'proyectado':'real'}</span></div>
-  ${accountGroupSections(visibleAccounts(state,active(),T),a=>walletCard(a,sel,proj),a=>cardAmount(a,sel,proj))}
+  ${accountGroupSections(visibleAccounts(state,active(),T),a=>walletCard(a,sel,proj),a=>sortAmount(a,cardAmount(a,sel,proj)))}
   <h2 style="padding:0 4px">Movimientos del día</h2>
   <div class="list">${dayTx.length?dayTx.map(txRow).join(''):'<p class="empty">Un día sin movimientos.</p>'}</div>`;
 }
@@ -228,7 +248,7 @@ function vAjustes(){
   <div class="head"><div><div class="kicker">Configuración</div><h1>Ajustes</h1></div></div>
   <div class="card" id="account-card"><div style="display:flex;flex-direction:column;gap:4px"><h2>Mi cuenta</h2><span class="small" style="line-height:1.5">${esc(connectionText||(SUPABASE_URL?'Inicia sesión para ver tus datos.':'Vista de ejemplo: los cambios no se guardan.'))}</span></div><button class="btn" data-action="login">${esc(loginText)}</button><button class="btn ghost" data-action="tutorial">Ver tutorial</button></div>
   ${currencies().length>1?`<div style="display:flex;flex-direction:column;gap:8px"><h3 style="padding:0 4px;color:var(--muted);font-size:14px">Moneda de los indicadores</h3><div class="seg" style="grid-template-columns:repeat(${currencies().length},minmax(0,1fr))"><span class="thumb" style="width:calc(${100/currencies().length}% - ${6/currencies().length}px);transform:translateX(${currencies().indexOf(ui.currency)*100}%)"></span>${currencies().map(c=>`<button data-action="set-cur" data-v="${c}" aria-pressed="${c===ui.currency}">${c}</button>`).join('')}</div></div>`:''}
-  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Mis cuentas</h2><button class="link" id="add-account" data-action="add-account">＋ Agregar</button></div>${accountGroupSections(orderedAccounts(state.accounts),a=>walletCard(a,today(),false,'account-edit'),a=>cardAmount(a,today(),false),' style="flex-wrap:wrap;overflow:visible"')}${!state.accounts.length?'<p class="empty">Comienza agregando una cuenta y su saldo actual.</p>':''}</div>
+  <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Mis cuentas</h2><button class="link" id="add-account" data-action="add-account">＋ Agregar</button></div>${accountGroupSections(orderedAccounts(state.accounts),a=>walletCard(a,today(),false,'account-edit'),a=>sortAmount(a,cardAmount(a,today(),false)),' style="flex-wrap:wrap;overflow:visible"')}${!state.accounts.length?'<p class="empty">Comienza agregando una cuenta y su saldo actual.</p>':''}</div>
   <div class="row2 even">${[['Costos recurrentes',rulesE,'rule'],['Ingresos recurrentes',rulesI,'income-rule']].map(([title,list,kindKey])=>`<div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h3 style="color:var(--muted);font-size:14px">${title}</h3><button class="link" id="${kindKey==='income-rule'?'add-income-rule':'add-rule'}" data-action="${kindKey==='income-rule'?'add-income-rule':'add-rule'}">＋ Agregar</button></div><div class="list">${list.length?list.map(r=>`<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.concept)}</span><span class="small">${freqText(r)} · ${esc(name(r.from||r.to))}</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v num" style="color:${r.kind==='income'?'var(--pos)':'var(--text)'};font-weight:600">${fmt(r.amount,account(r.from||r.to)?.currency||'MXN')}</span>${iconButton('edit','rule-edit',r.id,'Editar '+r.concept,esc)}${iconButton('delete','rule-delete',r.id,'Eliminar '+r.concept,esc)}</span></div>`).join(''):'<p class="empty">Ninguno registrado.</p>'}</div></div>`).join('')}</div>
   <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Nóminas</h2><button class="link" data-action="payroll">＋ Registrar</button></div><div class="list">${(state.payrolls||[]).length?(state.payrolls||[]).map(p=>{const bankTx=state.transactions.find(t=>t.payrollId===p.id&&(t.payrollPart==='bank'||(!t.payrollPart&&!t.concept.startsWith('Vales de despensa'))));return `<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px">${esc(p.company)} · ${esc(p.period)}</span><span class="small">Neto bancario ${fmt(bankTx?.amount??p.bankNet??p.totals.net)}</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v num">${fmt(p.totals.net)}</span>${iconButton('edit','payroll-edit',p.id,'Editar nómina de '+p.company,esc)}</span></div>`;}).join(''):'<p class="empty">Todavía no hay nóminas registradas.</p>'}</div><button class="link" data-action="import-payroll">Importar sugerencias de nómina</button></div>
   <div style="display:flex;flex-direction:column;gap:10px"><h2 style="padding:0 4px">Importar pagos programados</h2><p class="subtle" style="padding:0 4px">Carga un CSV con fechas desde hoy, sin límite de año. Revisa la vista previa antes de guardar.</p><div class="grid2"><button class="btn ghost" data-action="csv-template">Descargar plantilla</button><button class="btn ghost" data-action="csv-import">Cargar CSV</button></div><details class="card"><summary style="font-size:15px;font-weight:600">Ver formato y categorías</summary><p class="subtle">Columnas: id (opcional), fecha, tipo, concepto, cuenta_origen, cuenta_destino, monto, categoria, negocio, notas, monto_recibido. Tipos: pago, gasto, ingreso o transferencia. Fechas AAAA-MM-DD o DD/MM/AAAA.</p><p class="subtle">${CATEGORIES.map(esc).join(' · ')}</p></details></div>

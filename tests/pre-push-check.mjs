@@ -210,6 +210,18 @@
 //   arriba para reflejar el nuevo orden esperado (con cuentas de colores intercalados a
 //   propósito, para que una agrupación por color accidental sí se note). Ver pruebas
 //   "...se ordenan de mayor a menor monto (sin agrupar por color)" (una por cada vista).
+// - 2026-10-25: el orden por monto (punto anterior) comparaba los números tal cual, sin
+//   convertir divisa: una cuenta en CAD con un número pequeño (p. ej. $2,000 CAD) podía quedar
+//   muy abajo aunque, convertida a la misma moneda, valiera más que una cuenta en MXN con un
+//   número mayor ("el monto que está en CAD se ve pequeño porque está en CAD, pero si haces la
+//   conversión de currency, queda más arriba"). Se agregaron sortRate()/sortAmount() en app.js:
+//   solo para decidir el ORDEN (nunca el monto que se muestra en la tarjeta, que sigue en su
+//   propia moneda) convierten a MXN reusando quote() de exchange.js, con la misma caché de 1h;
+//   mientras no haya tasa disponible para una divisa se usa el monto sin convertir para esa
+//   cuenta en vez de bloquear el orden, y en cuanto la cotización llega (de forma perezosa, en
+//   segundo plano) se vuelve a renderizar con el orden ya corregido. Ver pruebas "...queda
+//   arriba de ... una vez convertida" y "...no rompe la app" (con la API de cotizaciones
+//   simulada y caída, respectivamente).
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 
@@ -1697,6 +1709,107 @@ function check(name, cond, detail = '') {
     );
 
     await orderPage.close();
+  }
+
+  // ---------- 2026-10-25: el orden por monto convierte a una moneda común (justo entre divisas) ----------
+  // Pedido: "Considera que el monto que esta en CAD se ve pequeño porque esta en CAD, pero si
+  // haces la conversion de currency, queda mas arriba." Se prueban dos escenarios: (a) con
+  // cotización disponible (simulada, para no depender de la red real), una cuenta en CAD con
+  // número pequeño debe pasar a quedar ARRIBA de una cuenta en MXN con número mayor, una vez
+  // convertida — y el monto que se MUESTRA en su tarjeta debe seguir en CAD, sin convertir; (b)
+  // con la API de cotizaciones caída, crear esa misma cuenta no debe romper nada (cae de nuevo a
+  // comparar montos sin convertir).
+  {
+    const fxPage = await context.newPage();
+    const fxErrors = [];
+    fxPage.on('pageerror', (e) => fxErrors.push(e.message));
+    fxPage.on('console', (m) => {
+      if (m.type() === 'error' && !m.text().includes('404')) fxErrors.push(m.text());
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    await fxPage.route('**api.frankfurter.dev/v2/rate/CAD/MXN**', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ amount: 1, base: 'CAD', date: today, rates: { MXN: 15 }, rate: 15 }) })
+    );
+    await fxPage.goto(BASE, { waitUntil: 'networkidle' });
+    await fxPage.waitForTimeout(700);
+    const tapFx = (sel) => fxPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+
+    await tapFx('.tabbar [data-tab="ajustes"]');
+    await fxPage.waitForTimeout(300);
+    await tapFx('#add-account');
+    await fxPage.waitForTimeout(400);
+    await fxPage.fill('[name=name]', 'Acc CAD chica en numero');
+    await fxPage.selectOption('[name=type]', 'debit');
+    await fxPage.selectOption('[name=currency]', 'CAD');
+    await fxPage.fill('input[aria-label="Saldo inicial (negativo si debes)"]', '2000');
+    await fxPage.evaluate(() => document.querySelector('input[aria-label="Saldo inicial (negativo si debes)"]').blur());
+    await tapFx('#save');
+    // Tiempo para que se resuelva la cotización simulada en segundo plano y se vuelva a renderizar.
+    await fxPage.waitForTimeout(1200);
+
+    const liquidoOrderFx = await fxPage.evaluate(() => {
+      const groups = [...document.querySelectorAll('#s-ajustes .account-group')];
+      const liquido = groups.find((g) => g.querySelector('.account-group-label')?.textContent.trim() === 'Líquido');
+      return liquido ? [...liquido.querySelectorAll('.wallet .wn')].map((n) => n.textContent.trim()) : null;
+    });
+    check(
+      'Ajustes → "Mis cuentas": una cuenta en CAD con número chico ($2,000 CAD ≈ $30,000 MXN con la tasa simulada) queda arriba de "Cuenta principal · ejemplo" (≈$23,155 MXN) una vez convertida para ordenar',
+      Array.isArray(liquidoOrderFx) &&
+        liquidoOrderFx.includes('Acc CAD chica en numero') &&
+        liquidoOrderFx.includes('Cuenta principal · ejemplo') &&
+        liquidoOrderFx.indexOf('Acc CAD chica en numero') < liquidoOrderFx.indexOf('Cuenta principal · ejemplo'),
+      JSON.stringify(liquidoOrderFx)
+    );
+
+    const cadCardText = await fxPage.evaluate(() => {
+      const card = [...document.querySelectorAll('#s-ajustes .wallet')].find((w) => w.querySelector('.wn')?.textContent.trim() === 'Acc CAD chica en numero');
+      return card ? { monto: card.querySelector('.wv')?.textContent || '', tipo: card.querySelector('.ws')?.textContent || '' } : null;
+    });
+    check(
+      'La conversión solo decide el ORDEN de las tarjetas: el monto que se muestra en la tarjeta de la cuenta CAD sigue en su propia moneda (no aparece convertido a MXN en pantalla)',
+      !!cadCardText && /CAD/.test(cadCardText.tipo) && /2,000/.test(cadCardText.monto) && !/30,000/.test(cadCardText.monto),
+      JSON.stringify(cadCardText)
+    );
+
+    await fxPage.close();
+  }
+
+  {
+    const fxFailPage = await context.newPage();
+    const fxFailErrors = [];
+    fxFailPage.on('pageerror', (e) => fxFailErrors.push(e.message));
+    fxFailPage.on('console', (m) => {
+      // ERR_FAILED es el aviso normal del navegador de que la petición se abortó a propósito
+      // (es justo lo que estamos simulando); no cuenta como error de la app.
+      if (m.type() === 'error' && !m.text().includes('404') && !m.text().includes('ERR_FAILED')) fxFailErrors.push(m.text());
+    });
+    await fxFailPage.route('**api.frankfurter.dev/**', (route) => route.abort());
+    await fxFailPage.goto(BASE, { waitUntil: 'networkidle' });
+    await fxFailPage.waitForTimeout(700);
+    const tapFxF = (sel) => fxFailPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+
+    await tapFxF('.tabbar [data-tab="ajustes"]');
+    await fxFailPage.waitForTimeout(300);
+    await tapFxF('#add-account');
+    await fxFailPage.waitForTimeout(400);
+    await fxFailPage.fill('[name=name]', 'Acc CAD sin red');
+    await fxFailPage.selectOption('[name=type]', 'debit');
+    await fxFailPage.selectOption('[name=currency]', 'CAD');
+    await fxFailPage.fill('input[aria-label="Saldo inicial (negativo si debes)"]', '2000');
+    await fxFailPage.evaluate(() => document.querySelector('input[aria-label="Saldo inicial (negativo si debes)"]').blur());
+    await tapFxF('#save');
+    await fxFailPage.waitForTimeout(1000);
+
+    const stillRendered = await fxFailPage.evaluate(
+      () => document.querySelectorAll('#s-ajustes .wallet').length > 0 && !!document.querySelector('[data-action="account-edit"][data-id]')
+    );
+    check(
+      'Si la API de cotizaciones no responde, crear una cuenta en otra divisa no rompe la app (sin errores de JS; cae de nuevo a comparar montos sin convertir)',
+      stillRendered && fxFailErrors.length === 0,
+      'rendered=' + stillRendered + ' errors=' + JSON.stringify(fxFailErrors)
+    );
+
+    await fxFailPage.close();
   }
 
   await browser.close();
