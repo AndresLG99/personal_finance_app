@@ -277,6 +277,18 @@
 //   de la app. Lección para la próxima vez que algo "deje de pasar" sin relación aparente:
 //   antes de asumir que es un bug nuevo en el código que se acaba de tocar, revisar si la
 //   hora del día (medianoche UTC) o un cambio de timing pueden explicarlo.
+// - 2026-10-29: en "Movimientos compartidos", mostrar la foto de perfil de quien hizo cada
+//   movimiento en vez del ícono de flecha (que no distinguía entre participantes). Se agregó
+//   sharedCreatorIds() en shared-accounts.js (ids distintos de creator_user_id ya cacheados)
+//   y cachedProfile()/refreshOtherProfiles() en profile.js (perfiles de OTRAS personas,
+//   permitido por self_or_participant_read en supabase-perfil.sql: solo de alguien con quien
+//   comparte al menos una cuenta). refreshSharedData() en app.js envuelve refreshShared() y
+//   además precarga esos perfiles en segundo plano (sin bloquear, igual que myProfile); se
+//   usa en TODOS los lugares que antes llamaban a refreshShared() directamente (unirse,
+//   agregar/editar/eliminar movimiento, compartir/dejar de compartir, los tres canales de
+//   tiempo real, y el login). sharedTxAvatarMarkup() en app.js decide, por movimiento: tu
+//   propia foto/iniciales (myProfile) si lo creaste tú, o las de la otra persona (del caché)
+//   si no. Ver pruebas "Movimientos compartidos: ...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
@@ -402,6 +414,23 @@ function fakeSupabaseShared(currentUserId, seedDb, book) {
   `;
 }
 const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; export const SUPABASE_PUBLISHABLE_KEY='fake-key';`;
+
+// Reusado por las pruebas de "Cuentas compartidas" (lote 2026-10-29) para inspeccionar qué
+// se está mostrando en vez del ícono de flecha en una fila de "Movimientos compartidos":
+// null si no se encontró la fila, o { hasImg, src, text } (si tiene foto, hasImg=true y src
+// es la URL; si no, hasImg=false y text son las iniciales mostradas).
+function sharedRowAvatar(page, concept) {
+  return page.evaluate((c) => {
+    const h2s = [...document.querySelectorAll('#push-content h2')];
+    const h2 = h2s.find((x) => x.textContent.trim() === 'Movimientos compartidos');
+    const card = h2 ? h2.closest('.card') : null;
+    const t1 = card ? [...card.querySelectorAll('.t1')].find((e) => e.textContent.trim() === c) : null;
+    const icon = t1 ? t1.closest('.tx')?.querySelector('.merchant-icon') : null;
+    if (!icon) return null;
+    const img = icon.querySelector('img');
+    return { hasImg: !!img, src: img ? img.getAttribute('src') : null, text: img ? null : icon.textContent.trim() };
+  }, concept);
+}
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
@@ -1998,6 +2027,12 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
       shared_accounts: [{ id: 'sa1', owner_user_id: 'owner-1', account_id: 'acc1', share_code: 'preset1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', color: 'auto', base_balance: 0, revoked: false }],
       shared_account_members: [],
       shared_account_transactions: [{ id: 'tx1', shared_account_id: 'sa1', creator_user_id: 'guest-9', kind: 'income', amount: 200000, concept: 'Depósito de X', category: '', date: TODAY }],
+      // Perfil de la persona invitada (con foto) para probar que "Movimientos compartidos"
+      // muestra SU foto en vez del ícono de flecha — ver sharedTxAvatarMarkup() en app.js.
+      // A propósito NO se siembra un perfil para 'owner-1' (el dueño): así se prueba también
+      // que, sin fila de perfil propia, el movimiento que agrega el dueño cae de nuevo a sus
+      // iniciales (de su correo, "owner-1@example.com" → "OW").
+      profiles: [{ id: 'guest-9', first_name: 'Gabriela', last_name: 'Soto', phone_country_code: '+52', phone_number: '', avatar_url: 'https://fake-test.supabase.co/storage/v1/object/public/avatars/guest-9/avatar.jpg' }],
     };
     const ownerBook = { payload: { accounts: [
       { id: 'acc1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', opening: 500000, asOf: '2026-01-01', available: true, archived: false },
@@ -2063,6 +2098,15 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
       String(otherRowReadonly)
     );
 
+    // 2026-10-29: en vez del ícono de flecha, "Movimientos compartidos" debe mostrar la
+    // foto de perfil de quien hizo cada movimiento (o sus iniciales si no tiene foto).
+    const depositoAvatar = await sharedRowAvatar(ownerPage, 'Depósito de X');
+    check(
+      'Movimientos compartidos: el movimiento de la persona invitada (con foto en su perfil) muestra su foto, no un ícono',
+      depositoAvatar?.hasImg === true && depositoAvatar?.src === 'https://fake-test.supabase.co/storage/v1/object/public/avatars/guest-9/avatar.jpg',
+      JSON.stringify(depositoAvatar)
+    );
+
     // El dueño agrega su propio movimiento compartido: debe quedar con su propio creator_user_id.
     await tapO2('[data-action="add-shared-tx"]');
     await ownerPage.waitForTimeout(400);
@@ -2078,6 +2122,12 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
       'Cuentas compartidas: el movimiento que agrega el dueño se guarda con su propio creator_user_id (no el de la cuenta)',
       myInsert?.creator_user_id === 'owner-1' && myInsert?.kind === 'expense' && myInsert?.amount === 30000,
       JSON.stringify(myInsert)
+    );
+    const cafeAvatar = await sharedRowAvatar(ownerPage, 'Café compartido');
+    check(
+      'Movimientos compartidos: tu propio movimiento muestra TUS iniciales (de tu correo, "owner-1@example.com" → "OW") al no tener foto ni nombre guardados',
+      cafeAvatar?.hasImg === false && cafeAvatar?.text === 'OW',
+      JSON.stringify(cafeAvatar)
     );
     const saldoTrasGasto = await ownerPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
     check(
@@ -2168,6 +2218,12 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
       'Cuentas compartidas: el movimiento que agrega la persona invitada queda con SU propio creator_user_id',
       guestInsert?.creator_user_id === 'guest-9' && guestInsert?.shared_account_id === 'sa2',
       JSON.stringify(guestInsert)
+    );
+    const refrescoAvatar = await sharedRowAvatar(guestPage, 'Refresco');
+    check(
+      'Movimientos compartidos: también funciona para la persona invitada — su propio movimiento muestra SUS iniciales (de "guest-9@example.com" → "GU")',
+      refrescoAvatar?.hasImg === false && refrescoAvatar?.text === 'GU',
+      JSON.stringify(refrescoAvatar)
     );
     const saldoGuestTrasGasto = await guestPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
     check('Cuentas compartidas: el saldo de la persona invitada también baja de inmediato ($5,000 − $50 = $4,950.00)', saldoGuestTrasGasto === '$4,950.00', saldoGuestTrasGasto);

@@ -10,8 +10,8 @@ import {enhanceMoneyInputs} from './money-input.js?v=20260922-1';
 import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260922-1';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
-import {sharedOwnedInfo,sharedJoinedAccounts,sharedAccountIdFor,sharedContribution,sharedTxAsTransactions,refreshShared,resetSharedCache,shareAccount,revokeShare,joinSharedAccount,addSharedTransaction,editSharedTransaction,deleteSharedTransaction,syncSharedBase} from './shared-accounts.js?v=20261025-1';
-import {COUNTRY_CODES,profileName,profileInitials,fetchProfile,saveProfile,uploadAvatar} from './profile.js?v=20261028-1';
+import {sharedOwnedInfo,sharedJoinedAccounts,sharedAccountIdFor,sharedContribution,sharedTxAsTransactions,sharedCreatorIds,refreshShared,resetSharedCache,shareAccount,revokeShare,joinSharedAccount,addSharedTransaction,editSharedTransaction,deleteSharedTransaction,syncSharedBase} from './shared-accounts.js?v=20261029-1';
+import {COUNTRY_CODES,profileName,profileInitials,fetchProfile,saveProfile,uploadAvatar,cachedProfile,refreshOtherProfiles,resetOtherProfiles} from './profile.js?v=20261029-1';
 
 import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow,removeAccount,accountRefs} from './finance.js?v=20261024-1';
 
@@ -404,11 +404,22 @@ function vAccount(id){
 // tú se puede deslizar para eliminar/editar, los de los demás se ven pero no se pueden
 // tocar (ver sharedTxAsTransactions en shared-accounts.js — eso es lo que garantiza que
 // cada persona solo modifique lo suyo, reforzado además por los permisos en Supabase).
+// En vez del ícono de flecha (que no distingue quién hizo cada movimiento), muestra la foto
+// de perfil de quien lo agregó — o sus iniciales si no tiene foto — con el mismo tamaño que
+// .merchant-icon para no desalinear la fila, pero circular (para que se lea como "una
+// persona" y no como "un comercio"). Para tus propios movimientos usa myProfile (ya
+// disponible); para los de otra persona usa el caché que precarga refreshSharedData().
+function sharedTxAvatarMarkup(t){
+  const mine=t.creatorUserId===user?.id;
+  const p=mine?myProfile:cachedProfile(t.creatorUserId);
+  const hasPhoto=!!p?.avatar_url;
+  return `<span class="merchant-icon" aria-hidden="true" style="border-radius:50%${hasPhoto?'':`;background:${mine?'var(--accent)':'#3A3B45'};color:${mine?'#1A0E08':'#fff'};font-weight:700;font-size:16px`}">${hasPhoto?`<img src="${esc(p.avatar_url)}" alt="" style="border-radius:50%;padding:0;background:none;object-fit:cover">`:esc(profileInitials(p,mine?user?.email:''))}</span>`;
+}
 function sharedAccountSection(a){
   const said=sharedAccountIdFor(a);if(!said)return '';
   const list=sharedTxAsTransactions(a,user?.id);
   return `<div class="card"><div class="row-between" style="padding:0 4px"><h2>Movimientos compartidos</h2><button type="button" class="link" data-action="add-shared-tx" data-id="${esc(a.id)}">＋ Agregar</button></div><div class="list">${list.length?list.map(t=>{
-    const row=`<div class="tx" style="padding-right:0">${t.__readonly?`<div class="tx" style="padding:0;border:0;flex:1;min-width:0">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</div>`:`<button type="button" class="tx" style="padding:0;border:0;flex:1;min-width:0" data-action="edit" data-id="${esc(t.id)}">${txIcon(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</button>`}</div>`;
+    const row=`<div class="tx" style="padding-right:0">${t.__readonly?`<div class="tx" style="padding:0;border:0;flex:1;min-width:0">${sharedTxAvatarMarkup(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</div>`:`<button type="button" class="tx" style="padding:0;border:0;flex:1;min-width:0" data-action="edit" data-id="${esc(t.id)}">${sharedTxAvatarMarkup(t)}<span class="mid-col"><span class="t1">${esc(t.concept)}</span><span class="t2">${dayLabel(t.date)}</span></span>${txAmount(t)}</button>`}</div>`;
     return t.__readonly?row:swipeRow(row,t,esc,{noDuplicate:true});
   }).join(''):'<p class="empty">Nadie ha agregado movimientos compartidos todavía.</p>'}</div></div>`;
 }
@@ -485,6 +496,16 @@ function allocationForm(expenseId){
  if(showMode){const modeSel=$('[name=mode]'),box=$('#alloc-choice'),src=$('#alloc-source');modeSel.onchange=()=>{if(box)box.hidden=modeSel.value!=='choose';if(src)src.hidden=modeSel.value!=='auto';};}
 }
 
+// Igual que refreshShared(), pero también precarga (en segundo plano, sin bloquear al que
+// llama) los perfiles de quienes agregaron cada movimiento compartido, para poder mostrar
+// su foto/iniciales en vez del ícono de flecha en "Movimientos compartidos" — ver
+// sharedTxAvatarMarkup(). Se re-renderiza sola cuando esos perfiles llegan, igual que
+// myProfile al iniciar sesión.
+async function refreshSharedData(){
+  await refreshShared(client,user.id);
+  refreshOtherProfiles(client,sharedCreatorIds()).then(renderAll).catch(()=>{});
+}
+
 // ---------- Cuentas compartidas: unirse con código, agregar/editar/eliminar un
 // movimiento compartido (ver shared-accounts.js para el resto: compartir/dejar de
 // compartir vive dentro de accountForm, más abajo). ----------
@@ -492,7 +513,7 @@ function joinSharedAccountForm(){
   if(!client||!user){notify('Inicia sesión para unirte a una cuenta compartida.');return;}
   modal('Unirme con código',input('code','Código que te compartieron','','text','required maxlength="20"'),async f=>{
     await joinSharedAccount(client,f.code);
-    await refreshShared(client,user.id);
+    await refreshSharedData();
     ensureCurrency();renderAll();
     notify('Te uniste a la cuenta compartida.');
   });
@@ -504,7 +525,7 @@ function addSharedTxForm(a){
   modal('Nuevo movimiento compartido',select('kind','Tipo',{expense:'Gasto',income:'Ingreso'},'expense')+input('concept','Concepto','','text','required maxlength="150"')+categoryField('')+input('date','Fecha',today(),'date','required')+input('amount','Importe','','number','required min="0.01" step="0.01"'),async f=>{
     checkCategory(f.category);
     await addSharedTransaction(client,said,user.id,{kind:f.kind,amount:cents(f.amount),concept:f.concept,category:f.category||'',date:f.date});
-    await refreshShared(client,user.id);
+    await refreshSharedData();
     renderAll();
   });
 }
@@ -517,14 +538,14 @@ function editSharedTxForm(sharedTxId){
   modal('Editar movimiento compartido',select('kind','Tipo',{expense:'Gasto',income:'Ingreso'},t.kind)+input('concept','Concepto',t.concept||'','text','required maxlength="150"')+categoryField(t.category)+input('date','Fecha',t.date,'date','required')+input('amount','Importe',t.amount/100,'number','required min="0.01" step="0.01"'),async f=>{
     checkCategory(f.category);
     await editSharedTransaction(client,rawId,{kind:f.kind,amount:cents(f.amount),concept:f.concept,category:f.category||'',date:f.date});
-    await refreshShared(client,user.id);
+    await refreshSharedData();
     renderAll();
   });
 }
 function deleteSharedTxForm(sharedTxId){
   modal('Eliminar movimiento',`<p>¿Eliminar este movimiento compartido? Esta acción no se puede deshacer.</p>`,async()=>{
     await deleteSharedTransaction(client,sharedTxId.replace(/^stx:/,''));
-    await refreshShared(client,user.id);
+    await refreshSharedData();
     renderAll();
   });
 }
@@ -543,8 +564,8 @@ function shareSectionFields(a){
 function bindShareSection(a){
   if(!(a.id&&!a.__shared&&client&&user))return;
   const shareBtn=$('#share-account'),unshareBtn=$('#unshare-account');
-  if(shareBtn)shareBtn.onclick=async()=>{try{shareBtn.disabled=true;await shareAccount(client,user.id,a);await refreshShared(client,user.id);accountForm(a);}catch(e){notify(e.message);shareBtn.disabled=false;}};
-  if(unshareBtn)unshareBtn.onclick=async()=>{try{unshareBtn.disabled=true;const info=sharedOwnedInfo(a.id);if(info)await revokeShare(client,info.id);await refreshShared(client,user.id);accountForm(a);}catch(e){notify(e.message);unshareBtn.disabled=false;}};
+  if(shareBtn)shareBtn.onclick=async()=>{try{shareBtn.disabled=true;await shareAccount(client,user.id,a);await refreshSharedData();accountForm(a);}catch(e){notify(e.message);shareBtn.disabled=false;}};
+  if(unshareBtn)unshareBtn.onclick=async()=>{try{unshareBtn.disabled=true;const info=sharedOwnedInfo(a.id);if(info)await revokeShare(client,info.id);await refreshSharedData();accountForm(a);}catch(e){notify(e.message);unshareBtn.disabled=false;}};
 }
 // Eliminar cuenta (desde Ajustes → Mis cuentas → tocar la cuenta → "Eliminar esta
 // cuenta"). Si tiene movimientos/reglas/metas asociadas no se borra (se perdería
@@ -813,9 +834,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.body.cl
 
 renderAll();
 
-if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);if(sharedChannel)await client.removeChannel(sharedChannel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();await refreshShared(client,user.id);renderAll();fetchProfile(client,user.id).then(p=>{myProfile=p;render('ajustes');}).catch(()=>{});channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});
+if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);if(sharedChannel)await client.removeChannel(sharedChannel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();await refreshSharedData();renderAll();fetchProfile(client,user.id).then(p=>{myProfile=p;render('ajustes');}).catch(()=>{});channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});
     // Segundo canal para cuentas compartidas (ver shared-accounts.js): cualquier cambio en
     // estas 3 tablas — alguien agregó/editó/eliminó un movimiento compartido, se compartió
     // o dejó de compartir una cuenta, o te uniste/te sacaron de una — refresca el caché y
     // vuelve a dibujar, igual que el canal de arriba hace con tu propio documento.
-    sharedChannel=client.channel('shared-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_transactions'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_accounts'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_members'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).subscribe();}else{document.querySelector('#welcome')?.remove();state=empty();resetSharedCache();myProfile=null;ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}
+    sharedChannel=client.channel('shared-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_transactions'},()=>{if(!busy)refreshSharedData().then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_accounts'},()=>{if(!busy)refreshSharedData().then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_members'},()=>{if(!busy)refreshSharedData().then(renderAll).catch(e=>notify(e.message));}).subscribe();}else{document.querySelector('#welcome')?.remove();state=empty();resetSharedCache();resetOtherProfiles();myProfile=null;ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}

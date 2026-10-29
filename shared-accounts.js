@@ -37,6 +37,16 @@ export function sharedJoinedAccounts() {
   return cache.joinedAccounts;
 }
 
+// Distinct creator_user_id de TODOS los movimientos compartidos ya cacheados (de todas las
+// cuentas, propias y a las que te uniste) — para precargar de una sola vez los perfiles
+// (nombre/foto) de quienes los agregaron, en vez de uno por uno al renderizar cada fila
+// (ver sharedTxAvatarMarkup en app.js).
+export function sharedCreatorIds() {
+  const ids = new Set();
+  for (const rows of cache.txByShared.values()) for (const r of rows) if (r.creator_user_id) ids.add(r.creator_user_id);
+  return [...ids];
+}
+
 // El id de shared_accounts correspondiente a una cuenta (propia compartida, o virtual de alguien más).
 export function sharedAccountIdFor(a) {
   if (!a) return null;

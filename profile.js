@@ -35,6 +35,32 @@ export async function fetchProfile(client, userId) {
   return data || { id: userId, first_name: '', last_name: '', phone_country_code: '+52', phone_number: '', avatar_url: null };
 }
 
+// Caché de perfiles de OTRAS personas (no el propio, que vive en myProfile dentro de
+// app.js) — para "Movimientos compartidos", donde hay que mostrar la foto/nombre de quien
+// agregó cada movimiento, no solo el propio. Permitido por la política
+// self_or_participant_read de supabase-perfil.sql: solo de alguien con quien comparte al
+// menos una cuenta.
+const otherProfiles = new Map();
+
+export function resetOtherProfiles() {
+  otherProfiles.clear();
+}
+
+export function cachedProfile(userId) {
+  return otherProfiles.get(userId) || null;
+}
+
+// No vuelve a pedir un id que ya esté en caché (aunque haya salido sin fila, para no
+// reintentarlo en cada render) — llamar de nuevo con ids nuevos sí los agrega.
+export async function refreshOtherProfiles(client, userIds) {
+  const need = [...new Set(userIds)].filter((id) => id && !otherProfiles.has(id));
+  if (!client || !need.length) return;
+  const { data, error } = await client.from('profiles').select('*').in('id', need);
+  if (error) return;
+  for (const id of need) otherProfiles.set(id, null);
+  for (const row of data || []) otherProfiles.set(row.id, row);
+}
+
 export async function saveProfile(client, userId, { first_name, last_name, phone_country_code, phone_number }) {
   const { error } = await client
     .from('profiles')
