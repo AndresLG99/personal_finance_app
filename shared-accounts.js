@@ -14,7 +14,12 @@
 //   tabla compartida.
 // - Solo gasto/ingreso directo — no transferencias, pagos de tarjeta ni MSI.
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Usa el mismo "hoy" (fecha LOCAL, en-CA) que el resto de la app (ver today() en finance.js)
+// en vez de la fecha UTC — si usáramos UTC, en zonas horarias con offset negativo (la
+// mayoría de América) habría hasta ~6-8 horas cada noche donde "hoy" según UTC ya sería
+// "mañana" en local, y el saldo base de una cuenta recién unida (asOf) quedaría un día
+// adelantado respecto al resto de la app.
+import { today as todayStr } from './finance.js?v=20261024-1';
 
 let cache = { ownedByAccountId: new Map(), joinedAccounts: [], txByShared: new Map() };
 

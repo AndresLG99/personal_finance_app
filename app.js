@@ -11,6 +11,7 @@ import {CSV_TEMPLATE,csvImportUI} from './csv-import.js?v=20260912-6';
 import {openPayroll} from './payroll.js?v=20260922-1';
 import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from './config.js?v=20260908-2';
 import {sharedOwnedInfo,sharedJoinedAccounts,sharedAccountIdFor,sharedContribution,sharedTxAsTransactions,refreshShared,resetSharedCache,shareAccount,revokeShare,joinSharedAccount,addSharedTransaction,editSharedTransaction,deleteSharedTransaction,syncSharedBase} from './shared-accounts.js?v=20261025-1';
+import {COUNTRY_CODES,profileName,profileInitials,fetchProfile,saveProfile,uploadAvatar} from './profile.js?v=20261028-1';
 
 import {today,monthDate,installments,balance,debt,validate,recurringDate,CATEGORIES,monthlyLists,longDate,balanceAfter,saveTransactionEdit,removeTransaction,removeRule,saveRule,canonicalCategory,migrateCategories,addDays,cardDate,billingWindow,removeAccount,accountRefs} from './finance.js?v=20261024-1';
 
@@ -28,7 +29,7 @@ const dayLabel=d=>{const t=today();if(d===t)return 'Hoy';if(d===addDays(t,-1))re
 const pct=v=>v===null||!isFinite(v)?'—':Math.round(v*100)+'%';
 const monthsTxt=v=>v===null||!isFinite(v)?'—':(v>=10?Math.round(v):v.toFixed(1))+(v>=0.95&&v<1.05?' mes':' meses');
 
-let client,user,revision=0,busy=false,channel,sharedChannel,connectionText='',loginText='Iniciar sesión';
+let client,user,revision=0,busy=false,channel,sharedChannel,connectionText='',loginText='Iniciar sesión',myProfile=null;
 
 const empty=()=>({accounts:[],transactions:[],rules:[],goals:[]});
 
@@ -264,7 +265,7 @@ function vAjustes(){
   const rulesE=state.rules.filter(r=>(r.kind||'expense')!=='income'),rulesI=state.rules.filter(r=>r.kind==='income');
   return `
   <div class="head"><div><div class="kicker">Configuración</div><h1>Ajustes</h1></div></div>
-  <div class="card" id="account-card"><div style="display:flex;flex-direction:column;gap:4px"><h2>Mi cuenta</h2><span class="small" style="line-height:1.5">${esc(connectionText||(SUPABASE_URL?'Inicia sesión para ver tus datos.':'Vista de ejemplo: los cambios no se guardan.'))}</span></div><button class="btn" data-action="login">${esc(loginText)}</button><button class="btn ghost" data-action="tutorial">Ver tutorial</button></div>
+  <div class="card" id="account-card"><div style="display:flex;flex-direction:column;gap:4px"><h2>Mi cuenta</h2><span class="small" style="line-height:1.5">${esc(connectionText||(SUPABASE_URL?'Inicia sesión para ver tus datos.':'Vista de ejemplo: los cambios no se guardan.'))}</span></div>${user?profileSummaryRow():''}<button class="btn" data-action="login">${esc(loginText)}</button><button class="btn ghost" data-action="tutorial">Ver tutorial</button></div>
   ${currencies().length>1?`<div style="display:flex;flex-direction:column;gap:8px"><h3 style="padding:0 4px;color:var(--muted);font-size:14px">Moneda de los indicadores</h3><div class="seg" style="grid-template-columns:repeat(${currencies().length},minmax(0,1fr))"><span class="thumb" style="width:calc(${100/currencies().length}% - ${6/currencies().length}px);transform:translateX(${currencies().indexOf(ui.currency)*100}%)"></span>${currencies().map(c=>`<button data-action="set-cur" data-v="${c}" aria-pressed="${c===ui.currency}">${c}</button>`).join('')}</div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Mis cuentas</h2><span style="display:flex;gap:14px">${client&&user?'<button type="button" class="link" id="join-shared-account" data-action="join-shared">Unirme con código</button>':''}<button class="link" id="add-account" data-action="add-account">＋ Agregar</button></span></div>${accountGroupSections(orderedAccounts([...state.accounts,...sharedJoinedAccounts()]),a=>walletCard(a,today(),false,a.__shared?'account':'account-edit'),a=>sortAmount(a,cardAmount(a,today(),false)),' style="flex-wrap:wrap;overflow:visible"')}${!state.accounts.length&&!sharedJoinedAccounts().length?'<p class="empty">Comienza agregando una cuenta y su saldo actual.</p>':''}</div>
   <div class="row2 even">${[['Costos recurrentes',rulesE,'rule'],['Ingresos recurrentes',rulesI,'income-rule']].map(([title,list,kindKey])=>`<div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h3 style="color:var(--muted);font-size:14px">${title}</h3><button class="link" id="${kindKey==='income-rule'?'add-income-rule':'add-rule'}" data-action="${kindKey==='income-rule'?'add-income-rule':'add-rule'}">＋ Agregar</button></div><div class="list">${list.length?list.map(r=>`<div class="settings-row"><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.concept)}</span><span class="small">${freqText(r)} · ${esc(name(r.from||r.to))}</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v num" style="color:${r.kind==='income'?'var(--pos)':'var(--text)'};font-weight:600">${fmt(r.amount,account(r.from||r.to)?.currency||'MXN')}</span>${iconButton('edit','rule-edit',r.id,'Editar '+r.concept,esc)}${iconButton('delete','rule-delete',r.id,'Eliminar '+r.concept,esc)}</span></div>`).join(''):'<p class="empty">Ninguno registrado.</p>'}</div></div>`).join('')}</div>
@@ -605,6 +606,48 @@ function newPasswordForm(){
 function login(){if(!client){notify(SUPABASE_URL?'La conexión aún no está lista. Espera unos segundos o recarga la página.':'La conexión a Supabase está pendiente. Esta vista solo contiene ejemplos.');return;}if(user){client.auth.signOut();return;}accessForm();}
 
 /* ========================================================================
+   Perfil: nombre, apellido, teléfono (con código de país), foto (o iniciales de
+   respaldo) y cambiar contraseña con sesión ya iniciada (distinto de
+   newPasswordForm, que viene del enlace de "recuperar contraseña" y por eso
+   recarga la página al terminar — aquí la sesión ya es válida, no hace falta).
+   ======================================================================== */
+function avatarMarkup(size){
+ const p=myProfile;
+ return p?.avatar_url?`<img src="${esc(p.avatar_url)}" alt="" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0">`:`<span style="width:${size}px;height:${size}px;border-radius:50%;background:var(--accent);color:#1A0E08;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${Math.round(size*0.4)}px;flex-shrink:0">${esc(profileInitials(p,user?.email))}</span>`;
+}
+function profileSummaryRow(){
+ return `<button type="button" class="settings-row" data-action="profile" style="min-height:56px;gap:12px">${avatarMarkup(40)}<span class="mid-col" style="text-align:left;min-width:0"><span class="t1">${esc(profileName(myProfile)||'Completa tu perfil')}</span><span class="t2" style="overflow:hidden;text-overflow:ellipsis">${esc(user?.email||'')}</span></span></button>`;
+}
+function profileForm(){
+ if(!client||!user){notify('Inicia sesión para ver tu perfil.');return;}
+ const p=myProfile||{};
+ modal('Mi perfil',
+  `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:4px 0 8px">${avatarMarkup(84)}<button type="button" id="change-avatar" class="link">${p.avatar_url?'Cambiar foto':'Agregar foto'}</button></div>`+
+  input('first_name','Nombre',p.first_name||'','text','maxlength="60"')+
+  input('last_name','Apellido',p.last_name||'','text','maxlength="60"')+
+  `<label>Correo electrónico<input type="email" value="${esc(user.email||'')}" disabled style="opacity:.7"></label>`+
+  `<div class="row" style="display:flex;gap:10px">${select('phone_country_code','Código',COUNTRY_CODES,p.phone_country_code||'+52')}${input('phone_number','Teléfono',p.phone_number||'','tel','maxlength="20"')}</div>`+
+  `<p><button type="button" id="change-password" class="link">Cambiar contraseña</button></p>`,
+  async f=>{
+   await saveProfile(client,user.id,f);
+   myProfile={...p,...f};
+   renderAll();
+  }
+ );
+ $('#change-password').onclick=()=>changePasswordForm();
+ $('#change-avatar').onclick=()=>$('#avatar-file').click();
+}
+function changePasswordForm(){
+ modal('Cambiar contraseña',`<p class="subtle">Elige una nueva contraseña para tu cuenta.</p>`+input('password','Nueva contraseña','','password','required minlength="8" autocomplete="new-password"')+input('confirmPassword','Confirmar contraseña','','password','required minlength="8" autocomplete="new-password"'),async f=>{
+  if(f.password!==f.confirmPassword)throw Error('Las contraseñas no coinciden.');
+  const {error}=await client.auth.updateUser({password:f.password});
+  if(error)throw error;
+  notify('Contraseña actualizada.');
+  return ()=>profileForm();
+ });passwordToggles($('#fields'));$('#save').textContent='Guardar';
+}
+
+/* ========================================================================
    Hoja (modal genérico): abrir/cerrar
    ======================================================================== */
 function openModalSheet(){document.body.classList.add('sheet-open');$('#sheet-body').scrollTop=0;}
@@ -741,6 +784,7 @@ document.addEventListener('click',e=>{
     case 'delete':id&&id.startsWith('stx:')?deleteSharedTxForm(id):deleteTransactionForm(state.transactions.find(t=>t.id===id));break;
     case 'add-shared-tx':addSharedTxForm(account(id));break;
     case 'join-shared':joinSharedAccountForm();break;
+    case 'profile':profileForm();break;
     case 'rule-edit':ruleForm(state.rules.find(r=>r.id===id));break;
     case 'rule-delete':deleteRuleForm(state.rules.find(r=>r.id===id));break;
     case 'payroll-edit':payrollForm(state.payrolls.find(p=>p.id===id));break;
@@ -764,13 +808,14 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('input',e=>{if(e.target.id==='q'){ui.q=e.target.value;const l=$('#mov-list');if(l)l.innerHTML=movList();}});
 $('#payroll-file').addEventListener('change',async e=>{try{const list=JSON.parse(await e.target.files[0].text());if(!Array.isArray(list)||list.some(t=>!['earnings','deductions','information'].includes(t.section)||typeof t.company!=='string'||typeof t.code!=='string'||typeof t.concept!=='string'||!Number.isSafeInteger(t.amount)||t.amount<0))throw Error('Catálogo inválido');const next=structuredClone(state);next.payrollTemplates??=[];for(const t of list){const i=next.payrollTemplates.findIndex(x=>x.company===t.company&&x.code===t.code&&x.section===t.section);if(i<0)next.payrollTemplates.push(t);else next.payrollTemplates[i]=t;}await persist(next);notify('Sugerencias de nómina guardadas en tu espacio privado.');}catch(e){notify(e.message);}finally{e.target.value='';}});
+$('#avatar-file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const url=await uploadAvatar(client,user.id,file);myProfile={...myProfile,avatar_url:url};render('ajustes');if(document.body.classList.contains('sheet-open'))profileForm();notify('Foto de perfil actualizada.');}catch(err){notify(err.message);}finally{e.target.value='';}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.body.classList.contains('sheet-open'))closeModalSheet();else if(ui.push)pop();}});
 
 renderAll();
 
-if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);if(sharedChannel)await client.removeChannel(sharedChannel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();await refreshShared(client,user.id);renderAll();channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});
+if(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY){try{if(!window.supabase)throw Error('No se pudo cargar la librería de conexión (vendor/supabase.umd.js). Revisa tu conexión e inténtalo de nuevo.');const {createClient}=window.supabase;client=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);client.auth.onAuthStateChange((_event,session)=>{if(_event==='TOKEN_REFRESHED'&&session?.user.id===user?.id){user=session.user;return;}if(_event==='PASSWORD_RECOVERY'){newPasswordForm();return;}setTimeout(async()=>{try{user=session?.user;if(channel)await client.removeChannel(channel);if(sharedChannel)await client.removeChannel(sharedChannel);loginText=user?'Cerrar sesión':'Iniciar sesión';connectionText=user?'Conectado · sincronizando':'Inicia sesión para ver tus datos';renderAll();if(user){await load();await refreshShared(client,user.id);renderAll();fetchProfile(client,user.id).then(p=>{myProfile=p;render('ajustes');}).catch(()=>{});channel=client.channel('book-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'finance_books',filter:'user_id=eq.'+user.id},()=>{if(!busy)load().catch(e=>notify(e.message));}).subscribe(status=>{connectionText=status==='SUBSCRIBED'?'Sincronizado en la nube':'Conectado · sincronización pendiente';render('ajustes');});
     // Segundo canal para cuentas compartidas (ver shared-accounts.js): cualquier cambio en
     // estas 3 tablas — alguien agregó/editó/eliminó un movimiento compartido, se compartió
     // o dejó de compartir una cuenta, o te uniste/te sacaron de una — refresca el caché y
     // vuelve a dibujar, igual que el canal de arriba hace con tu propio documento.
-    sharedChannel=client.channel('shared-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_transactions'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_accounts'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_members'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).subscribe();}else{document.querySelector('#welcome')?.remove();state=empty();resetSharedCache();ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}
+    sharedChannel=client.channel('shared-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_transactions'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_accounts'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).on('postgres_changes',{event:'*',schema:'public',table:'shared_account_members'},()=>{if(!busy)refreshShared(client,user.id).then(renderAll).catch(e=>notify(e.message));}).subscribe();}else{document.querySelector('#welcome')?.remove();state=empty();resetSharedCache();myProfile=null;ensureCurrency();renderAll();}}catch(e){notify(e.message);}},0);});window.addEventListener('focus',()=>{if(user&&!document.body.classList.contains('sheet-open'))load().catch(e=>notify(e.message));});}catch(e){notify('No se pudo conectar: '+e.message);}}

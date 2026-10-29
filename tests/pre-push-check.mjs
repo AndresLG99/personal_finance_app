@@ -240,10 +240,49 @@
 //   todas las pruebas de este archivo), se prueba simulando un cliente de Supabase falso con
 //   datos propios (mismo mecanismo que ya se usaba para "recuperar contraseña" más abajo) en
 //   vez de con el servidor de pruebas normal. Ver pruebas "Cuentas compartidas: ...".
+// - 2026-10-28: Perfil. Pedido: nombre, apellido, teléfono (con código de país), ver el
+//   correo registrado, cambiar contraseña, foto de perfil (o iniciales si no hay foto).
+//   Nuevo archivo profile.js + tabla public.profiles y bucket de Storage "avatars" (ver
+//   supabase-perfil.sql). "Mi cuenta" en Ajustes ahora muestra la foto/iniciales y el
+//   nombre (o "Completa tu perfil"); tocarla abre "Mi perfil", con un botón aparte para
+//   "Cambiar contraseña" (reusa auth.updateUser(), pero a diferencia de "nueva contraseña"
+//   de la recuperación por correo, aquí la sesión ya es válida y no se recarga la página).
+//   Se prueba igual que "Cuentas compartidas" arriba, con fakeSupabaseShared (extendido con
+//   una tabla profiles, auth.updateUser y client.storage.from('avatars').upload/
+//   getPublicUrl). Ver pruebas "Perfil: ...".
+// - 2026-10-28 (2): al agregar el punto anterior, correr la batería completa justo antes de
+//   hacer commit (como marca la disciplina de este proyecto) encontró 3 pruebas que
+//   empezaron a fallar SIN que el código de Perfil tuviera relación directa con ellas (el
+//   mismo fallo salía dos veces seguidas, así que no era aleatorio): la del orden por FX de
+//   CAD y las dos de "el saldo del dueño incluye lo agregado por la persona invitada". La
+//   causa real NO fue Perfil en sí, sino dos problemas que Perfil dejó al descubierto:
+//   (a) shared-accounts.js calculaba su propio "hoy" con new Date().toISOString() (fecha en
+//   UTC) para el saldo base (asOf) de una cuenta compartida a la que te uniste, mientras que
+//   el resto de la app (today() en finance.js) usa la fecha LOCAL (en-CA); en zonas horarias
+//   con offset negativo (la mayoría de América) hay varias horas cada noche en las que "hoy"
+//   en UTC ya es "mañana" en local, y esa fecha compartida quedaba un día adelantada. La
+//   prueba de "Cuentas compartidas" en este archivo tenía el MISMO problema al sembrar la
+//   fecha de su movimiento de prueba, así que el síntoma (saldo sin el movimiento del
+//   invitado) se veía tanto en la app real como en la prueba — se corrigió en ambos lados
+//   (shared-accounts.js ahora importa today() de finance.js; este archivo usa
+//   toLocaleDateString('en-CA') en vez de toISOString() al sembrar esa fecha). (b) en el
+//   flujo de inicio de sesión, el nuevo fetchProfile(client,user.id) se esperaba (await)
+//   ANTES de renderAll(), agregando una llamada de red más, en serie, antes de que la app
+//   terminara de "asentarse" — eso retrasaba lo suficiente la cotización de cambio en
+//   segundo plano (quote(), usada para ordenar cuentas en otra divisa) como para que la
+//   prueba de orden por FX, con una espera fija, la encontrara todavía sin resolver. Se
+//   corrigió para que el perfil cargue en SEGUNDO PLANO (sin bloquear renderAll ni el resto
+//   del arranque) y solo vuelva a pintar Ajustes cuando llega — igual que ya se hacía con la
+//   cotización de cambio — para que agregar Perfil no haga más lento el arranque del resto
+//   de la app. Lección para la próxima vez que algo "deje de pasar" sin relación aparente:
+//   antes de asumir que es un bug nuevo en el código que se acaba de tocar, revisar si la
+//   hora del día (medianoche UTC) o un cambio de timing pueden explicarlo.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+import { fileURLToPath } from 'node:url';
 
 const BASE = process.argv[2] || 'http://127.0.0.1:8901/index.html';
+const AVATAR_FIXTURE = fileURLToPath(new URL('./fixtures/avatar-test.png', import.meta.url));
 const results = [];
 function check(name, cond, detail = '') {
   results.push({ name, pass: !!cond, detail });
@@ -262,7 +301,9 @@ function fakeSupabaseShared(currentUserId, seedDb, book) {
   return `
     window.supabase = {
       createClient: function () {
-        const db = Object.assign({ finance_books: [], shared_accounts: [], shared_account_members: [], shared_account_transactions: [] }, ${seedJson});
+        const db = Object.assign({ finance_books: [], shared_accounts: [], shared_account_members: [], shared_account_transactions: [], profiles: [] }, ${seedJson});
+        const storageFiles = {};
+        const userEmail = ${uidJson} + '@example.com';
         const bookSeed = ${bookJson};
         if (bookSeed) db.finance_books.push({ user_id: ${uidJson}, payload: bookSeed.payload, revision: bookSeed.revision });
         let seq = 0;
@@ -313,11 +354,26 @@ function fakeSupabaseShared(currentUserId, seedDb, book) {
           auth: {
             onAuthStateChange: function (cb) {
               window.__testEmit = function (event, session) { cb(event, session); };
-              setTimeout(function () { cb('SIGNED_IN', { user: { id: ${uidJson} } }); }, 0);
+              setTimeout(function () { cb('SIGNED_IN', { user: { id: ${uidJson}, email: userEmail } }); }, 0);
             },
-            getSession: async function () { return { data: { session: { user: { id: ${uidJson} } } }, error: null }; },
-            refreshSession: async function () { return { data: { session: { user: { id: ${uidJson} } } }, error: null }; },
+            getSession: async function () { return { data: { session: { user: { id: ${uidJson}, email: userEmail } } }, error: null }; },
+            refreshSession: async function () { return { data: { session: { user: { id: ${uidJson}, email: userEmail } } }, error: null }; },
+            updateUser: async function (args) { log('updateUser', args); return { error: null }; },
             signOut: async function () { return { error: null }; },
+          },
+          storage: {
+            from: function (bucket) {
+              return {
+                upload: async function (path, blob, opts) {
+                  log('storage:' + bucket + ':upload', { path, size: blob && blob.size, contentType: opts && opts.contentType });
+                  storageFiles[bucket + '/' + path] = blob;
+                  return { data: { path }, error: null };
+                },
+                getPublicUrl: function (path) {
+                  return { data: { publicUrl: 'https://fake-test.supabase.co/storage/v1/object/public/' + bucket + '/' + path } };
+                },
+              };
+            },
           },
           from: builder,
           rpc: async function (name, args) {
@@ -1930,7 +1986,14 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
 
   // ---------- 2026-10-25 (2): cuentas compartidas — lado del dueño ----------
   {
-    const TODAY = new Date().toISOString().slice(0, 10);
+    // OJO: usar la fecha LOCAL (en-CA), igual que today() en finance.js — no
+    // toISOString(), que es UTC. En zonas horarias con offset negativo (la mayoría de
+    // América), hay varias horas cada noche en las que "hoy" en UTC ya es "mañana" en
+    // local; si se sembrara con la fecha UTC, el movimiento compartido de prueba quedaría
+    // fechado un día "en el futuro" respecto al today() de la app durante esas horas, y el
+    // filtro r.date<=date de sharedContribution lo excluiría del saldo (bug 2026-10-28:
+    // así se detectó esta inconsistencia, ver también shared-accounts.js).
+    const TODAY = new Date().toLocaleDateString('en-CA');
     const ownerSeed = {
       shared_accounts: [{ id: 'sa1', owner_user_id: 'owner-1', account_id: 'acc1', share_code: 'preset1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', color: 'auto', base_balance: 0, revoked: false }],
       shared_account_members: [],
@@ -2109,6 +2172,119 @@ const FAKE_CONFIG = `export const SUPABASE_URL='https://fake-test.supabase.co'; 
     const saldoGuestTrasGasto = await guestPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
     check('Cuentas compartidas: el saldo de la persona invitada también baja de inmediato ($5,000 − $50 = $4,950.00)', saldoGuestTrasGasto === '$4,950.00', saldoGuestTrasGasto);
     await guestPage.close();
+  }
+
+  // ---------- 2026-10-28: Perfil (nombre, apellido, teléfono, foto/iniciales, cambiar
+  // contraseña con sesión ya iniciada) ----------
+  // Igual que "Cuentas compartidas" arriba, depende de verdad de Supabase (tabla
+  // public.profiles + bucket de Storage "avatars", ver supabase-perfil.sql), así que se
+  // prueba con fakeSupabaseShared en vez del servidor de pruebas normal. Se sembró la fila
+  // de perfil vacía (igual que handle_new_user() la crearía en el proyecto real) para que
+  // el guardado haga un UPDATE real sobre una fila existente, no sobre una que no existe.
+  {
+    const profileSeed = { profiles: [{ id: 'perfil-1', first_name: '', last_name: '', phone_country_code: '+52', phone_number: '', avatar_url: null }] };
+    const pfPage = await context.newPage();
+    await pfPage.route('**/config.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: FAKE_CONFIG }));
+    await pfPage.route('**/vendor/supabase.umd.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: fakeSupabaseShared('perfil-1', profileSeed, null) }));
+    await pfPage.goto(BASE, { waitUntil: 'networkidle' });
+    await pfPage.waitForTimeout(900);
+    const tapP = (sel) => pfPage.evaluate((s) => document.querySelector(s)?.click(), sel);
+    const textP = (sel) => pfPage.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+    const callsP = () => pfPage.evaluate(() => JSON.parse(localStorage.getItem('__testCalls') || '[]'));
+
+    await tapP('.tabbar [data-tab="ajustes"]');
+    await pfPage.waitForTimeout(400);
+
+    // Sin nombre ni foto todavía: iniciales a partir del correo, y la fila invita a
+    // "Completa tu perfil".
+    check(
+      'Perfil: antes de llenarlo, "Mi cuenta" invita a "Completa tu perfil" y muestra tus iniciales (de tu correo) en vez de foto',
+      (await textP('#account-card [data-action="profile"] .t1')) === 'Completa tu perfil' &&
+        (await pfPage.evaluate(() => !document.querySelector('#account-card [data-action="profile"] img'))) &&
+        (await textP('#account-card [data-action="profile"] span')) === 'PE',
+      JSON.stringify({ t1: await textP('#account-card [data-action="profile"] .t1'), initials: await textP('#account-card [data-action="profile"] span') })
+    );
+    check(
+      'Perfil: "Mi cuenta" muestra el correo registrado en la cuenta',
+      (await textP('#account-card [data-action="profile"] .t2')) === 'perfil-1@example.com'
+    );
+
+    await tapP('[data-action="profile"]');
+    await pfPage.waitForTimeout(400);
+    check('Perfil: abre una hoja "Mi perfil" con el correo (no editable)', (await textP('#modal-title')) === 'Mi perfil' && (await pfPage.evaluate(() => document.querySelector('[type=email]')?.disabled === true && document.querySelector('[type=email]')?.value === 'perfil-1@example.com')));
+
+    await pfPage.fill('[name=first_name]', 'Ana');
+    await pfPage.fill('[name=last_name]', 'Pérez');
+    await pfPage.selectOption('[name=phone_country_code]', '+1');
+    await pfPage.fill('[name=phone_number]', '5551234567');
+    await tapP('#save');
+    await pfPage.waitForTimeout(500);
+    const profileUpdateCall = (await callsP()).filter((c) => c[0] === 'from:profiles' && c[1]?.pendingUpdate).map((c) => c[1].pendingUpdate).find((u) => u.first_name === 'Ana');
+    check(
+      'Perfil: guardar nombre/apellido/teléfono llama a un UPDATE en profiles con esos datos',
+      profileUpdateCall?.first_name === 'Ana' && profileUpdateCall?.last_name === 'Pérez' && profileUpdateCall?.phone_country_code === '+1' && profileUpdateCall?.phone_number === '5551234567',
+      JSON.stringify(profileUpdateCall)
+    );
+    check(
+      'Perfil: tras guardar, "Mi cuenta" ya muestra el nombre completo y las iniciales correctas (sin necesitar recargar)',
+      (await textP('#account-card [data-action="profile"] .t1')) === 'Ana Pérez' && (await textP('#account-card [data-action="profile"] span')) === 'AP'
+    );
+
+    // Foto de perfil: subirla reemplaza las iniciales por una <img>, y la hoja (que sigue
+    // abierta, porque uploadAvatar() la reconstruye) también la muestra de inmediato.
+    await tapP('[data-action="profile"]');
+    await pfPage.waitForTimeout(400);
+    check('Perfil: sin foto todavía, el botón dice "Agregar foto"', (await textP('#change-avatar')) === 'Agregar foto');
+    await pfPage.setInputFiles('#avatar-file', AVATAR_FIXTURE);
+    await pfPage.waitForTimeout(700);
+    const uploadCall = (await callsP()).find((c) => c[0] === 'storage:avatars:upload');
+    check('Perfil: subir una foto llama a storage.from("avatars").upload con la ruta "<id>/avatar.jpg"', uploadCall?.[1]?.path === 'perfil-1/avatar.jpg', JSON.stringify(uploadCall));
+    const avatarUpdateCall = (await callsP()).filter((c) => c[0] === 'from:profiles' && c[1]?.pendingUpdate).map((c) => c[1].pendingUpdate).find((u) => u.avatar_url);
+    check('Perfil: tras subirla, se guarda avatar_url en profiles (URL pública del bucket)', /\/storage\/v1\/object\/public\/avatars\/perfil-1\/avatar\.jpg/.test(avatarUpdateCall?.avatar_url || ''), avatarUpdateCall?.avatar_url);
+    check(
+      'Perfil: la hoja sigue abierta tras subir la foto y ahora muestra una <img> (ya no iniciales), con el botón "Cambiar foto"',
+      (await pfPage.evaluate(() => !!document.querySelector('#modal img'))) && (await textP('#change-avatar')) === 'Cambiar foto'
+    );
+    await tapP('[data-action="profile"]');
+    await pfPage.waitForTimeout(400);
+    check(
+      'Perfil: "Mi cuenta" también muestra ya la foto (no iniciales) tras recargar la hoja',
+      await pfPage.evaluate(() => !!document.querySelector('#account-card [data-action="profile"] img'))
+    );
+    await pfPage.keyboard.press('Escape');
+    await pfPage.waitForTimeout(300);
+
+    // Cambiar contraseña con sesión ya iniciada: a diferencia de "nueva contraseña" (que
+    // viene del enlace de recuperación y recarga la página al terminar), aquí la sesión ya
+    // es válida, así que debe quedarse en la app y regresar al formulario de perfil.
+    await tapP('[data-action="profile"]');
+    await pfPage.waitForTimeout(400);
+    await tapP('#change-password');
+    await pfPage.waitForTimeout(400);
+    check('Perfil: "Cambiar contraseña" abre una hoja separada con dos campos de contraseña', (await textP('#modal-title')) === 'Cambiar contraseña' && (await pfPage.evaluate(() => !!document.querySelector('[name=password]') && !!document.querySelector('[name=confirmPassword]'))));
+
+    await pfPage.fill('[name=password]', 'claveNueva123');
+    await pfPage.fill('[name=confirmPassword]', 'otraCosa456');
+    await tapP('#save');
+    await pfPage.waitForTimeout(400);
+    check(
+      'Perfil → Cambiar contraseña: si no coinciden, se rechaza sin llamar a updateUser',
+      /no coinciden/i.test((await textP('#error')) || '') && !(await callsP()).some((c) => c[0] === 'updateUser'),
+      await textP('#error')
+    );
+
+    await pfPage.fill('[name=password]', 'claveNueva123');
+    await pfPage.fill('[name=confirmPassword]', 'claveNueva123');
+    await tapP('#save');
+    await pfPage.waitForTimeout(400);
+    const pwUpdateCall = (await callsP()).find((c) => c[0] === 'updateUser');
+    check('Perfil → Cambiar contraseña: si coinciden, llama a updateUser con la nueva contraseña', pwUpdateCall?.[1]?.password === 'claveNueva123', JSON.stringify(pwUpdateCall));
+    check(
+      'Perfil → Cambiar contraseña: a diferencia de "nueva contraseña" (recuperación), aquí NO se recarga la página — se regresa a la hoja "Mi perfil"',
+      (await textP('#modal-title')) === 'Mi perfil'
+    );
+
+    await pfPage.close();
   }
 
   await browser.close();
