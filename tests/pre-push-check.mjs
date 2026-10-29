@@ -2622,6 +2622,74 @@ function sharedRowAvatar(page, concept) {
     await pfPage.close();
   }
 
+  // ---------- Tutorial guiado (onboarding.js, punto 6, 2026-10-30): se agregaron pasos
+  // nuevos para cubrir lo construido en esta sesión (compartir una cuenta, Perfil,
+  // Apariencia) sin tocar los pasos que ya existían. Cubre: el total de pasos ahora es 11;
+  // los 3 pasos nuevos aparecen con el título correcto y en el orden esperado; avanzar con
+  // "Siguiente" y retroceder con "Anterior" no rompe nada (sin errores de consola); y el
+  // paso final sigue llevando a "Configurar cuenta" como antes. ----------
+  {
+    const tourPage = await context.newPage();
+    const tourErrors = [];
+    tourPage.on('console', (msg) => { if (msg.type() === 'error' && !msg.text().includes('404')) tourErrors.push(msg.text()); });
+    tourPage.on('pageerror', (err) => tourErrors.push('pageerror: ' + err.message));
+    await tourPage.goto(BASE, { waitUntil: 'networkidle' });
+    await tourPage.waitForTimeout(700);
+    await tourPage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await tourPage.waitForTimeout(300);
+    await tourPage.evaluate(() => document.querySelector('[data-action="tutorial"]').click());
+    await tourPage.waitForTimeout(300);
+    check('Tutorial: el botón "Ver tutorial" abre la hoja de la guía', await tourPage.evaluate(() => document.querySelector('#welcome')?.open === true));
+
+    const titles = [];
+    for (let i = 0; i < 20; i++) {
+      const t = await tourPage.evaluate(() => document.querySelector('#welcome-title')?.textContent.trim());
+      if (t === undefined || t === null) break;
+      titles.push(t);
+      const isLast = await tourPage.evaluate(() => document.querySelector('#welcome-next')?.textContent.trim() === 'Configurar mi cuenta');
+      if (isLast) break;
+      await tourPage.evaluate(() => document.querySelector('#welcome-next').click());
+      await tourPage.waitForTimeout(250);
+    }
+    check(
+      'Tutorial: ahora son 11 pasos en total (8 que ya existían + 3 nuevos: Comparte una cuenta, Personaliza tu perfil, A tu gusto)',
+      titles.length === 11,
+      JSON.stringify(titles)
+    );
+    check(
+      'Tutorial: el paso nuevo "Comparte una cuenta" aparece justo después de "Primero, tus cuentas" (antes de "Registra tu día a día")',
+      titles[1] === 'Primero, tus cuentas' && titles[2] === 'Comparte una cuenta' && titles[3] === 'Registra tu día a día',
+      JSON.stringify(titles)
+    );
+    check(
+      'Tutorial: los pasos nuevos "Personaliza tu perfil" y "A tu gusto" aparecen después de "Explora tus cuentas" y antes de "Todo listo para empezar"',
+      titles[7] === 'Explora tus cuentas' && titles[8] === 'Personaliza tu perfil' && titles[9] === 'A tu gusto' && titles[10] === 'Todo listo para empezar',
+      JSON.stringify(titles)
+    );
+    check('Tutorial: recorrer los 11 pasos con "Siguiente" no generó errores de consola', tourErrors.length === 0, tourErrors.join(' | '));
+
+    // Retroceder con "Anterior" regresa al paso previo sin romper nada.
+    await tourPage.evaluate(() => document.querySelector('#welcome-back').click());
+    await tourPage.waitForTimeout(250);
+    check(
+      'Tutorial: "Anterior" desde el último paso regresa a "A tu gusto" (el penúltimo)',
+      (await tourPage.evaluate(() => document.querySelector('#welcome-title')?.textContent.trim())) === 'A tu gusto'
+    );
+    await tourPage.evaluate(() => document.querySelector('#welcome-next').click());
+    await tourPage.waitForTimeout(250);
+
+    // El paso final ("Configurar mi cuenta") sigue cerrando la guía y abriendo "Configurar cuenta".
+    await tourPage.evaluate(() => document.querySelector('#welcome-next').click());
+    await tourPage.waitForTimeout(400);
+    check(
+      'Tutorial: el botón final "Configurar mi cuenta" cierra la guía y abre el formulario "Configurar cuenta"',
+      !(await tourPage.evaluate(() => !!document.querySelector('#welcome'))) &&
+        (await tourPage.evaluate(() => document.querySelector('#modal-title')?.textContent.trim())) === 'Configurar cuenta'
+    );
+
+    await tourPage.close();
+  }
+
   // ---------- Tema claro/oscuro/sistema y color de acentuación configurable (punto 5,
   // 2026-10-29 (3)) — cubre: default "Sistema" sin fijar data-theme; Claro/Oscuro fijan
   // data-theme y persisten en localStorage tras recargar; volver a "Sistema" quita el

@@ -1,7 +1,7 @@
 import {paymentCandidates,allocateExpense,autoPaymentWindow,defaultPaymentSource,createAutoPayment} from './payment-allocation.js?v=20260924-1';
 import {walletTheme,walletColors,merchantIcon} from './wallet.js?v=20261024-1';
 import {activityLists,chronological,stampTransactions} from './activity.js?v=20260917-1';
-import {needsWelcome,openWelcome} from './onboarding.js?v=20260924-1';
+import {needsWelcome,openWelcome} from './onboarding.js?v=20261030-1';
 import {orderedAccounts,accountGroupSections} from './account-groups.js?v=20261024-1';
 import {swipeRow,iconButton,passwordToggles} from './transaction-actions.js?v=20261025-1';
 import {crossCurrency,refreshPending,exchangeFields,bindExchange,quote} from './exchange.js?v=20260915-3';
@@ -267,7 +267,7 @@ function vAjustes(){
   return `
   <div class="head"><div><div class="kicker">Configuración</div><h1>Ajustes</h1></div></div>
   <div class="card" id="account-card"><div style="display:flex;flex-direction:column;gap:4px"><h2>Mi cuenta</h2><span class="small" style="line-height:1.5">${esc(connectionText||(SUPABASE_URL?'Inicia sesión para ver tus datos.':'Vista de ejemplo: los cambios no se guardan.'))}</span></div>${user?profileSummaryRow():''}<button class="btn" data-action="login">${esc(loginText)}</button><button class="btn ghost" data-action="tutorial">Ver tutorial</button></div>
-  ${(()=>{const mode=getThemeMode(),modes=[['system','Sistema'],['light','Claro'],['dark','Oscuro']],idx=modes.findIndex(([k])=>k===mode);return `<div class="card"><h2>Apariencia</h2>
+  ${(()=>{const mode=getThemeMode(),modes=[['system','Sistema'],['light','Claro'],['dark','Oscuro']],idx=modes.findIndex(([k])=>k===mode);return `<div class="card" id="appearance-card"><h2>Apariencia</h2>
     <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))"><span class="thumb" style="width:calc(33.333% - 2px);transform:translateX(${idx*100}%)"></span>${modes.map(([k,l])=>`<button data-action="set-theme" data-v="${k}" aria-pressed="${k===mode}" style="font-size:13px">${l}</button>`).join('')}</div>
     <div class="settings-row"><span>Color de acentuación</span><span style="display:flex;align-items:center;gap:10px"><input type="color" id="accent-picker" class="accent-picker" value="${esc(getAccent())}" aria-label="Color de acentuación">${getAccent().toLowerCase()!==DEFAULT_ACCENT.toLowerCase()?'<button type="button" class="link" data-action="reset-accent">Restablecer</button>':''}</span></div>
   </div>`;})()}
