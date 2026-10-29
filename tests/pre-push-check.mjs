@@ -289,6 +289,33 @@
 //   tiempo real, y el login). sharedTxAvatarMarkup() en app.js decide, por movimiento: tu
 //   propia foto/iniciales (myProfile) si lo creaste tú, o las de la otra persona (del caché)
 //   si no. Ver pruebas "Movimientos compartidos: ...".
+// - 2026-10-29 (2): bloquear movimientos individuales en cuentas compartidas. Pedido:
+//   evitar que el dueño siga agregando gasto/ingreso "normal" (desde Nuevo movimiento, una
+//   regla recurrente, la asignación automática de pagos de tarjeta, o un CSV importado) a
+//   una cuenta que ya comparte, porque esos movimientos nunca los ve la otra persona pero sí
+//   cambian el saldo que ella sí ve (se "cuelan" en el base_balance que sincroniza
+//   syncSharedBase en cada guardado) — rompe la transparencia que es el punto de compartir
+//   una cuenta. Se agregó isSharedAccount(a) en app.js (envuelve sharedOwnedInfo) y se usó
+//   para: (a) excluir esas cuentas de opts(), el selector de cuentas que usan Nuevo
+//   movimiento, reglas recurrentes y metas — conservando la cuenta ya asignada si el
+//   movimiento/regla/meta se creó ANTES de compartirla, para no romper su edición; (b) una
+//   segunda validación, en el propio guardado de cada formulario, por si el valor llegara
+//   igual (defensa en profundidad, igual que ya se hacía con "las cuentas deben ser
+//   diferentes"); (c) en la asignación automática de pago de tarjeta (allocationForm +
+//   defaultPaymentSource en payment-allocation.js), si la cuenta sugerida por el último pago
+//   ya es compartida, se obliga a elegir otra en vez de reusarla en automático; (d) en la
+//   importación de CSV, previewCSV() ahora recibe el set de ids de cuentas compartidas y
+//   rechaza cualquier fila que apunte a una de ellas con un error claro. Además, al tocar
+//   "Compartir esta cuenta" en una cuenta que ya tiene saldo o movimientos, ahora se muestra
+//   antes una advertencia (shareAccountForm en app.js): ese saldo se "migra" como el punto de
+//   partida que verá la otra persona, pero el detalle de los movimientos que lo formaron
+//   sigue siendo privado — de ahí en adelante, los movimientos nuevos deben agregarse como
+//   "Movimiento compartido". No se tocó el base_balance ni se creó una fila nueva en
+//   shared_account_transactions para "migrar" el saldo (evita contarlo doble: el saldo
+//   compartido ya es base_balance + movimientos compartidos, y base_balance sigue
+//   reflejando el saldo privado real, que de aquí en adelante ya no cambia porque los
+//   movimientos nuevos están bloqueados). Ver pruebas "Cuentas compartidas: los movimientos
+//   individuales nuevos..." y la prueba de previewCSV al inicio del archivo.
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
@@ -433,6 +460,30 @@ function sharedRowAvatar(page, concept) {
 }
 
 (async () => {
+  // ---------- previewCSV: rechaza filas que apuntan a una cuenta ya compartida (punto 3,
+  // 2026-10-29 (2)) — prueba directa de la función pura, sin navegador: no depende del DOM,
+  // así que no hace falta levantar Chromium ni el servidor estático para esta parte. ----------
+  {
+    const { previewCSV } = await import('../csv-import.js');
+    const csvState = { accounts: [
+      { id: 'acc1', name: 'Compartida', currency: 'MXN', archived: false },
+      { id: 'acc2', name: 'Normal', currency: 'MXN', archived: false },
+    ], transactions: [] };
+    const csvText = 'id,fecha,tipo,concepto,cuenta_origen,cuenta_destino,monto,categoria,negocio,notas,monto_recibido\r\n1,2026-01-01,gasto,Prueba CSV,acc1,,100.00,Otros,,,\r\n';
+    const withoutBlock = previewCSV(csvText, csvState, '2020-01-01');
+    const withBlock = previewCSV(csvText, csvState, '2020-01-01', new Set(['acc1']));
+    check(
+      'previewCSV: sin marcar ninguna cuenta como compartida, una fila con cuenta_origen=acc1 se acepta normalmente',
+      withoutBlock.errors.length === 0 && withoutBlock.transactions.length === 1,
+      JSON.stringify(withoutBlock)
+    );
+    check(
+      'previewCSV: con acc1 en el set de cuentas compartidas, la misma fila se rechaza con un error que lo explica',
+      withBlock.errors.length === 1 && /compartida/i.test(withBlock.errors[0]) && withBlock.transactions.length === 0,
+      JSON.stringify(withBlock)
+    );
+  }
+
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
   const consoleErrors = [];
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -2037,7 +2088,14 @@ function sharedRowAvatar(page, concept) {
     const ownerBook = { payload: { accounts: [
       { id: 'acc1', name: 'Cuenta para compartir', type: 'debit', currency: 'MXN', opening: 500000, asOf: '2026-01-01', available: true, archived: false },
       { id: 'acc2', name: 'Cuenta sin compartir', type: 'debit', currency: 'MXN', opening: 100000, asOf: '2026-01-01', available: true, archived: false },
-    ], transactions: [], rules: [], goals: [] }, revision: 1 };
+      // Saldo 0 y sin movimientos a propósito: para probar que compartir una cuenta SIN
+      // nada que migrar no muestra la advertencia de saldo/movimientos existentes (punto 3,
+      // 2026-10-29 (2)).
+      { id: 'acc3', name: 'Cuenta vacía', type: 'debit', currency: 'MXN', opening: 0, asOf: '2026-01-01', available: true, archived: false },
+    // Movimiento de ANTES de compartir acc1 (ya estaba ahí cuando se sembró sa1 arriba):
+    // sirve para probar que, al bloquear movimientos NUEVOS en una cuenta compartida, los
+    // que ya existían de antes siguen pudiéndose editar sin romperse.
+    ], transactions: [{ id: 'oldtx1', kind: 'expense', concept: 'Gasto viejo en cuenta compartida', category: 'Otros', from: 'acc1', date: '2026-01-10', amount: 50000, status: 'done' }], rules: [], goals: [] }, revision: 1 };
 
     const ownerPage = await context.newPage();
     await ownerPage.route('**/config.js*', (route) => route.fulfill({ contentType: 'application/javascript', body: FAKE_CONFIG }));
@@ -2057,10 +2115,21 @@ function sharedRowAvatar(page, concept) {
       'Cuentas compartidas: una cuenta sin compartir muestra el botón "Compartir esta cuenta" (no "Compartida")',
       (await ownerPage.evaluate(() => !!document.querySelector('#share-account'))) && !(await ownerPage.evaluate(() => !!document.querySelector('#unshare-account')))
     );
+    // 2026-10-29 (2): "Compartir esta cuenta" ya no comparte de inmediato — primero muestra
+    // una advertencia (acc2 tiene saldo de $1,000.00, aunque sin movimientos todavía) y solo
+    // comparte cuando se confirma.
     await tapO2('#share-account');
+    await ownerPage.waitForTimeout(400);
+    const warnBody = (await textO2('#fields')) || '';
+    check(
+      'Cuentas compartidas: al tocar "Compartir esta cuenta" en una con saldo, se muestra antes una advertencia (con el saldo actual y que de ahí en adelante se usa "Movimientos compartidos")',
+      (await textO2('#modal-title')) === 'Compartir esta cuenta' && /\$1,000\.00/.test(warnBody) && /Movimientos compartidos/.test(warnBody),
+      warnBody
+    );
+    await tapO2('#save');
     await ownerPage.waitForTimeout(500);
     check(
-      'Cuentas compartidas: al compartirla, se guarda en shared_accounts con el id de la cuenta y el usuario dueño, y se muestra el código',
+      'Cuentas compartidas: al confirmar la advertencia, se comparte de verdad: se guarda en shared_accounts y se muestra el código',
       /Compartida · código\s+CODE1/.test((await textO2('#fields')) || ''),
       await textO2('#fields')
     );
@@ -2073,6 +2142,29 @@ function sharedRowAvatar(page, concept) {
     await ownerPage.keyboard.press('Escape');
     await ownerPage.waitForTimeout(300);
 
+    // acc3 no tiene saldo ni movimientos: compartirla no debería mostrar la advertencia de
+    // "ya tiene saldo/movimientos" (solo el aviso simple de que los nuevos movimientos van
+    // por "Movimientos compartidos").
+    await tapO2('[data-action="account-edit"][data-id="acc3"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('#share-account');
+    await ownerPage.waitForTimeout(400);
+    const emptyWarnBody = (await textO2('#fields')) || '';
+    check(
+      'Cuentas compartidas: compartir una cuenta sin saldo ni movimientos no muestra la advertencia de "ya tiene..." (solo el aviso simple)',
+      !/ya tiene/.test(emptyWarnBody) && /Movimientos compartidos/.test(emptyWarnBody),
+      emptyWarnBody
+    );
+    await tapO2('#save');
+    await ownerPage.waitForTimeout(500);
+    check(
+      'Cuentas compartidas: esa cuenta sin nada que migrar igual queda compartida al confirmar',
+      /Compartida · código\s+CODE2/.test((await textO2('#fields')) || ''),
+      await textO2('#fields')
+    );
+    await ownerPage.keyboard.press('Escape');
+    await ownerPage.waitForTimeout(300);
+
     // Cuenta YA compartida (acc1, sembrada con un movimiento compartido de "guest-9"): el
     // saldo debe incluir ese movimiento, y no debe poder editarse/eliminarse (no es suyo).
     await tapO2('.tabbar [data-tab="insights"]');
@@ -2081,8 +2173,8 @@ function sharedRowAvatar(page, concept) {
     await ownerPage.waitForTimeout(500);
     const saldoTexto = await ownerPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
     check(
-      'Cuentas compartidas: el saldo del dueño incluye lo agregado por la persona invitada ($5,000 + $2,000 = $7,000.00)',
-      saldoTexto === '$7,000.00',
+      'Cuentas compartidas: el saldo del dueño incluye lo agregado por la persona invitada ($5,000 − $500 del gasto previo + $2,000 = $6,500.00)',
+      saldoTexto === '$6,500.00',
       saldoTexto
     );
     const otherRowReadonly = await ownerPage.evaluate(() => {
@@ -2131,8 +2223,8 @@ function sharedRowAvatar(page, concept) {
     );
     const saldoTrasGasto = await ownerPage.evaluate(() => document.querySelector('#push-content .wallet .num')?.textContent?.trim());
     check(
-      'Cuentas compartidas: el saldo baja de inmediato con el nuevo movimiento ($7,000 − $300 = $6,700.00)',
-      saldoTrasGasto === '$6,700.00',
+      'Cuentas compartidas: el saldo baja de inmediato con el nuevo movimiento ($6,500 − $300 = $6,200.00)',
+      saldoTrasGasto === '$6,200.00',
       saldoTrasGasto
     );
     const myRowEditable = await ownerPage.evaluate(() => {
@@ -2147,6 +2239,88 @@ function sharedRowAvatar(page, concept) {
       myRowEditable === true,
       String(myRowEditable)
     );
+
+    // ---------- 2026-10-29 (2): bloquear movimientos individuales en cuentas compartidas.
+    // En este punto del flujo, acc1 y acc3 ya están compartidas (acc1 desde la semilla,
+    // acc3 confirmada arriba) y acc2 no (se compartió y se dejó de compartir). ----------
+    await tapO2('.tabbar [data-tab="movimientos"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('[data-action="new"]');
+    await ownerPage.waitForTimeout(400);
+    const fromOptions = await ownerPage.evaluate(() => [...document.querySelectorAll('[name=from] option')].map((o) => o.value));
+    check(
+      'Cuentas compartidas: "Nuevo movimiento" no ofrece cuentas ya compartidas (acc1 ni acc3) como origen, pero sí la que no se comparte (acc2)',
+      !fromOptions.includes('acc1') && !fromOptions.includes('acc3') && fromOptions.includes('acc2'),
+      JSON.stringify(fromOptions)
+    );
+    const blockNote = (await textO2('#fields')) || '';
+    check(
+      'Cuentas compartidas: "Nuevo movimiento" explica que esas cuentas se agregan desde "Movimientos compartidos"',
+      /Movimientos compartidos/.test(blockNote),
+      blockNote
+    );
+
+    // Defensa en profundidad: aunque el selector ya no ofrezca la cuenta compartida,
+    // forzar su valor igual (simulando manipulación del DOM) debe rechazarse al guardar.
+    await ownerPage.evaluate(() => {
+      const sel = document.querySelector('[name=from]');
+      const opt = document.createElement('option');
+      opt.value = 'acc1';
+      sel.appendChild(opt);
+      sel.value = 'acc1';
+    });
+    await ownerPage.fill('[name=concept]', 'Intento de movimiento individual');
+    await ownerPage.fill('input[aria-label="Importe"]', '10');
+    await ownerPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+    await tapO2('#save');
+    await ownerPage.waitForTimeout(400);
+    check(
+      'Cuentas compartidas: si se fuerza igual el valor de una cuenta compartida (manipulando el DOM), el guardado lo rechaza con un mensaje claro',
+      /es compartida/i.test((await textO2('#error')) || ''),
+      await textO2('#error')
+    );
+    await ownerPage.keyboard.press('Escape');
+    await ownerPage.waitForTimeout(300);
+
+    // Un movimiento que YA existía en acc1 desde antes de compartirla (oldtx1, sembrado
+    // arriba) debe seguir pudiéndose editar sin romperse.
+    await tapO2('.tabbar [data-tab="insights"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('.wallet[data-id="acc1"]');
+    await ownerPage.waitForTimeout(500);
+    await ownerPage.evaluate(() => {
+      const row = [...document.querySelectorAll('#push-content .t1')].find((e) => e.textContent.trim() === 'Gasto viejo en cuenta compartida');
+      row?.closest('button[data-action="edit"]')?.click();
+    });
+    await ownerPage.waitForTimeout(400);
+    const oldTxFromValue = await ownerPage.evaluate(() => document.querySelector('[name=from]')?.value);
+    check(
+      'Cuentas compartidas: un movimiento de ANTES de compartir la cuenta sigue mostrando esa cuenta seleccionada al editarlo (no se rompe su edición)',
+      oldTxFromValue === 'acc1',
+      oldTxFromValue
+    );
+    await tapO2('#save');
+    await ownerPage.waitForTimeout(400);
+    check(
+      'Cuentas compartidas: guardar sin cambios ese movimiento viejo no lo rechaza (solo se bloquean movimientos NUEVOS)',
+      !(await ownerPage.evaluate(() => document.body.classList.contains('sheet-open'))),
+      await textO2('#error')
+    );
+
+    // Una regla recurrente nueva tampoco debe poder apuntar a una cuenta compartida.
+    await tapO2('.tabbar [data-tab="ajustes"]');
+    await ownerPage.waitForTimeout(400);
+    await tapO2('[data-action="add-rule"]');
+    await ownerPage.waitForTimeout(400);
+    const ruleOptions = await ownerPage.evaluate(() => [...document.querySelectorAll('[name=from] option')].map((o) => o.value));
+    check(
+      'Cuentas compartidas: una regla recurrente nueva tampoco ofrece cuentas compartidas como cuenta',
+      !ruleOptions.includes('acc1') && !ruleOptions.includes('acc3') && ruleOptions.includes('acc2'),
+      JSON.stringify(ruleOptions)
+    );
+    await ownerPage.keyboard.press('Escape');
+    await ownerPage.waitForTimeout(300);
+
     await ownerPage.close();
   }
 

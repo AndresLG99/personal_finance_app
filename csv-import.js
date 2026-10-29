@@ -35,10 +35,13 @@ export function csvMoney(raw){
  const n=Math.round(Number(s)*100);if(!Number.isSafeInteger(n)||n<=0)throw Error('El monto debe ser positivo.');return n;
 }
 const signature=t=>JSON.stringify([t.date,t.kind,t.from||'',t.to||'',t.amount,t.received||t.amount,categoryKey(t.concept)]);
-export function previewCSV(text,state,current=today()){
+// sharedIds: ids de cuentas propias ya compartidas (ver isSharedAccount en app.js) — sus
+// movimientos nuevos deben agregarse como "Movimiento compartido" para que los vea
+// también la otra persona, nunca por CSV (que solo guarda movimientos privados).
+export function previewCSV(text,state,current=today(),sharedIds=new Set()){
  const parsed=parseCSV(text),transactions=[],errors=[];let past=0,duplicates=0;
  const seen=new Set(state.transactions.map(signature));const ids=new Map(state.transactions.filter(t=>t.csvId).map(t=>[t.csvId,signature(t)]));
- const account=value=>{if(!value)return null;const matches=state.accounts.filter(a=>!a.archived&&(a.id===value||categoryKey(a.name)===categoryKey(value)));if(matches.length!==1)throw Error(`Cuenta inexistente o ambigua: ${value}. Usa su nombre exacto o ID.`);return matches[0];};
+ const account=value=>{if(!value)return null;const matches=state.accounts.filter(a=>!a.archived&&(a.id===value||categoryKey(a.name)===categoryKey(value)));if(matches.length!==1)throw Error(`Cuenta inexistente o ambigua: ${value}. Usa su nombre exacto o ID.`);if(sharedIds.has(matches[0].id))throw Error(`${value} es una cuenta compartida: agrega sus movimientos desde "Movimientos compartidos", no por CSV.`);return matches[0];};
  const kinds={pago:'payment',payment:'payment',gasto:'expense',expense:'expense',ingreso:'income',income:'income',transferencia:'transfer',transfer:'transfer'};
  for(const row of parsed){try{
   const date=csvDate(row.fecha);if(date<current){past++;continue;}
@@ -60,16 +63,16 @@ export function previewCSV(text,state,current=today()){
  }catch(e){errors.push(`Fila ${row.line}: ${e.message}`);}}
  return {transactions,errors,past,duplicates,total:parsed.length};
 }
-export function csvImportUI({state,getState,modal,persist,uid,esc,money,notify}){
+export function csvImportUI({state,getState,modal,persist,uid,esc,money,notify,sharedAccountIds=()=>new Set()}){
  const input=document.createElement('input');input.type='file';input.accept='.csv,text/csv';
  input.onchange=async()=>{try{
   const file=input.files[0];if(!file)return;if(file.size>4500000)throw Error('El archivo supera 4.5 MB. Divídelo en archivos más pequeños.');
-  const text=await file.text(),report=previewCSV(text,getState()),date=today();
+  const date=today(),text=await file.text(),report=previewCSV(text,getState(),date,sharedAccountIds());
   const names=id=>getState().accounts.find(a=>a.id===id)?.name||'—';
   modal('Importar pagos programados',`<p>Archivo: ${esc(file.name)}. Fecha de referencia: ${date}.</p><p>${report.transactions.length} por importar · ${report.past} anteriores a hoy omitidos · ${report.duplicates} duplicados omitidos.</p><p>Se incluyen hoy y fechas posteriores, sin límite de año. Todos se guardan como programados sin confirmar.</p>${report.errors.length?`<p class="negative">Corrige los ${report.errors.length} errores y vuelve a cargar el CSV. No se guardará ninguna fila.</p>${report.errors.slice(0,30).map(e=>`<p>${esc(e)}</p>`).join('')}`:''}<div class="csv-preview">${report.transactions.slice(0,100).map(t=>`<div class="row"><div class="grow"><strong>${esc(t.concept)}</strong><small>${t.date} · ${esc(names(t.from))} → ${esc(names(t.to))}</small></div>${money(t.kind==='income'?t.amount:-t.amount,getState().accounts.find(a=>a.id===(t.from||t.to))?.currency,t.kind==='transfer'?'neutral':undefined)}</div>`).join('')}</div>${report.transactions.length>100?'<p>Vista previa de las primeras 100 filas; se importarán todas las válidas.</p>':''}`,async()=>{
    if(report.errors.length)throw Error('Corrige el archivo antes de importarlo.');
    // Volver a comparar evita duplicados si cambian los datos o la fecha mientras se revisa.
-   const current=getState(),fresh=previewCSV(text,current);if(fresh.errors.length)throw Error(fresh.errors[0]);if(!fresh.transactions.length)throw Error('No hay programaciones nuevas para importar.');
+   const current=getState(),fresh=previewCSV(text,current,date,sharedAccountIds());if(fresh.errors.length)throw Error(fresh.errors[0]);if(!fresh.transactions.length)throw Error('No hay programaciones nuevas para importar.');
    const next=structuredClone(current);next.transactions.push(...fresh.transactions.map(t=>({...t,id:uid()})));await persist(next);notify(`${fresh.transactions.length} pagos programados importados.`);
   });
  }catch(e){notify(e.message);}};input.click();
