@@ -20,7 +20,12 @@ export function payoff(state,id,current=today()){
  const events=state.transactions.filter(t=>(t.from===id||t.to===id)&&t.date>=a.asOf&&(t.date>current||t.status==='pending')).map(t=>({...t,projectionDate:t.date<current?current:t.date})).sort((a,b)=>a.projectionDate.localeCompare(b.projectionDate));
  // Group same-day activity so a payment followed by a charge is not treated as payoff.
  const days=new Map();for(const t of events){days.set(t.projectionDate,(days.get(t.projectionDate)||0)+effect(t,id));if(t.status==='pending'&&t.date<current)overdue++;}
- for(const [day,change] of days){value+=change;if(sign*value>0)date=null;else if(!date)date=day;}
+ // La fecha de liquidación es la PRIMERA vez que el saldo llega a $0 (o mejor), no la
+ // última: antes, si tras saldarse un cargo futuro programado (p. ej. una regla
+ // recurrente) volvía a generar deuda y otro pago la volvía a saldar más adelante, esta
+ // fecha se reemplazaba por la del segundo saldo. Ahora, una vez encontrada la primera
+ // fecha en $0, ya no se vuelve a mover aunque el saldo proyectado vuelva a subir.
+ for(const [day,change] of days){value+=change;if(!date&&sign*value<=0)date=day;}
  return {outstanding,remaining:Math.max(0,sign*value),date,overdue,projected:value};
 }
 export function duplicateDraft(t,current=today()){

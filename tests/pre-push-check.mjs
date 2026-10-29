@@ -335,6 +335,15 @@
 //   .side-tab, .fab y sharedTxAvatarMarkup()/avatarMarkup() en app.js ahora usan variables
 //   en vez de un literal) para que ningún control se vuelva invisible o de bajo contraste
 //   al cambiar de tema o de acento. Ver pruebas "Apariencia: ...".
+// - 2026-10-30: la fecha de liquidación de tarjetas/deudas (payoff() en insights.js, que
+//   alimenta "Se liquida" en vAccount y vRecomendaciones) mostraba la ÚLTIMA fecha en que
+//   el saldo proyectado llegaba a $0, no la primera: el bucle que recorre los movimientos
+//   futuros reseteaba la fecha encontrada a null cada vez que el saldo volvía a subir (p.
+//   ej. por un cargo futuro programado o una regla recurrente), y la volvía a fijar en el
+//   siguiente momento en que llegara a $0 — así que, con un ciclo de "se salda → se
+//   vuelve a endeudar → se vuelve a saldar", se reportaba la fecha del último ciclo. Ahora,
+//   una vez encontrada la primera fecha en $0, ya no se vuelve a mover. Ver prueba "Fecha
+//   de liquidación: ...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
@@ -861,6 +870,78 @@ function sharedRowAvatar(page, concept) {
   } else {
     check('"Se liquida" (shortDate) muestra el mes con mayúscula inicial y el año (p. ej. "3 Abr 2027")', false, 'no se encontró la tarjeta de crédito de ejemplo');
     check('el Historial de la cuenta (dayLabel) muestra el mes con mayúscula inicial y el año (p. ej. "Domingo 1 de Dic 2026")', false, 'no se encontró la tarjeta de crédito de ejemplo');
+  }
+
+  // ---------- Fecha de liquidación (payoff en insights.js): debe ser la PRIMERA vez que el
+  // saldo llega a $0, no la última (2026-10-30). Antes, el bucle reseteaba la fecha a null
+  // cada vez que el saldo proyectado volvía a subir (p. ej. por un cargo futuro programado)
+  // y la fijaba de nuevo en el siguiente momento en que volviera a $0 — así que, con un
+  // cargo futuro que vuelve a generar deuda y un segundo pago que la vuelve a saldar más
+  // adelante, "Se liquida" mostraba la fecha de ESE segundo saldo en vez de la primera.
+  // Aquí se arma justo ese escenario en la tarjeta de ejemplo (que ya trae un pago pendiente
+  // de $1,500 el día 22 del próximo mes, dejando $3,000 de deuda): un pago que la salda por
+  // completo unos días después, luego un cargo que la vuelve a endeudar $500 dos meses
+  // adelante, y un segundo pago que la vuelve a saldar poco después — "Se liquida" debe
+  // seguir mostrando la fecha del PRIMER pago, no la del segundo. ----------
+  {
+    const payoffPage = await context.newPage();
+    await payoffPage.goto(BASE, { waitUntil: 'networkidle' });
+    await payoffPage.waitForTimeout(700);
+
+    const monthsFromNow = (months, day) => {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() + months, day);
+      return d.toISOString().slice(0, 10);
+    };
+    const firstPayoffDate = monthsFromNow(1, 25);
+    const chargeDate = monthsFromNow(2, 10);
+    const secondPayoffDate = monthsFromNow(2, 20);
+
+    const addTx = async (kind, from, date, amount) => {
+      await payoffPage.evaluate(() => document.querySelector('.fab[data-action="new"]').click());
+      await payoffPage.waitForTimeout(400);
+      await payoffPage.selectOption('[name=kind]', kind);
+      await payoffPage.waitForTimeout(300);
+      await payoffPage.fill('[name=concept]', 'Prueba payoff ' + kind + ' ' + date);
+      await payoffPage.selectOption('[name=from]', from);
+      await payoffPage.selectOption('[name=status]', 'pending');
+      await payoffPage.fill('[name=date]', date);
+      await payoffPage.fill('input[aria-label="Importe"]', String(amount));
+      await payoffPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await payoffPage.evaluate(() => document.querySelector('#save').click());
+      await payoffPage.waitForTimeout(500);
+    };
+
+    await addTx('payment', 'bank', firstPayoffDate, '3000'); // salda los $3,000 que quedan tras el pago de ejemplo
+    await addTx('expense', 'credit', chargeDate, '500'); // un cargo futuro vuelve a generar $500 de deuda
+    await addTx('payment', 'bank', secondPayoffDate, '500'); // y un segundo pago la vuelve a saldar
+
+    check(
+      'Fecha de liquidación: se pudieron programar los 3 movimientos de la prueba (sin quedar la hoja abierta por un error)',
+      !(await payoffPage.evaluate(() => document.body.classList.contains('sheet-open')))
+    );
+
+    await payoffPage.evaluate(() => document.querySelector('.tabbar [data-tab="insights"]').click());
+    await payoffPage.waitForTimeout(400);
+    await payoffPage.evaluate(() => document.querySelector('.wallet[data-id="credit"]').click());
+    await payoffPage.waitForTimeout(500);
+    const liquidaText = await payoffPage.evaluate(() => {
+      const labels = [...document.querySelectorAll('#push-content .card.tight .label')];
+      const label = labels.find((l) => l.textContent.trim() === 'Se liquida');
+      return label ? label.nextElementSibling?.textContent.trim() : null;
+    });
+    const expectedLabel = await payoffPage.evaluate((d) => {
+      const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+      const x = new Date(d + 'T12:00:00');
+      return x.getDate() + ' ' + cap(x.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '')) + ' ' + x.getFullYear();
+    }, firstPayoffDate);
+    check(
+      'Fecha de liquidación: "Se liquida" muestra la PRIMERA fecha en que la tarjeta llega a $0, aunque un cargo futuro programado la vuelva a endeudar y otro pago posterior la vuelva a saldar',
+      liquidaText === expectedLabel,
+      'esperado: ' + expectedLabel + ' · obtenido: ' + liquidaText
+    );
+
+    await payoffPage.close();
   }
 
   // ---------- Regresión: las tarjetas de cuenta se agrupan en Líquido / Deudas / Por cobrar ----------
