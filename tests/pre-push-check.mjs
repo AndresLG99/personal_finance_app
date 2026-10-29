@@ -316,6 +316,25 @@
 //   reflejando el saldo privado real, que de aquí en adelante ya no cambia porque los
 //   movimientos nuevos están bloqueados). Ver pruebas "Cuentas compartidas: los movimientos
 //   individuales nuevos..." y la prueba de previewCSV al inicio del archivo.
+// - 2026-10-29 (3): modo claro/oscuro (por default "Sistema", con "Claro"/"Oscuro" como
+//   elección explícita que siempre gana) y color de acentuación libre (cualquier HEX, ya
+//   no una paleta fija). El cálculo de color vive UNA sola vez, en un <script> normal al
+//   inicio de <head> en index.html (ANTES de las hojas de estilo, para que la primera
+//   pintura ya salga con lo guardado en localStorage sin parpadeo): ahí se deriva
+//   --accent-ink (blanco u oscuro #1A0E08 según la luminancia relativa WCAG del color
+//   elegido, para que el texto/ícono encima siempre se lea) y --accent-soft/-dark/-hover/
+//   -border/-shadow/-tint-weak a partir de ese único color base. theme.js (módulo que
+//   importa app.js) solo agrega la persistencia en localStorage (theme:mode, theme:accent)
+//   y llama a esas mismas funciones (window.__theme), sin duplicar la fórmula. styles.css
+//   mantiene oscuro como default de :root y agrega overrides de variables bajo
+//   :root[data-theme="light"] y @media(prefers-color-scheme:light) (solo si no hay
+//   elección explícita en contra). Se auditaron interface.css/styles.css/app.js en busca
+//   de colores fijos que asumían SIEMPRE fondo oscuro o SIEMPRE el naranja original
+//   (entre otros: navbar/pushbar/tabs ahora usan --chrome-bg; .sheet/.fields usan
+//   --surface/--field; .seg, .chip[aria-pressed], .color-auto-btn, .color-swatch,
+//   .side-tab, .fab y sharedTxAvatarMarkup()/avatarMarkup() en app.js ahora usan variables
+//   en vez de un literal) para que ningún control se vuelva invisible o de bajo contraste
+//   al cambiar de tema o de acento. Ver pruebas "Apariencia: ...".
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
@@ -486,7 +505,12 @@ function sharedRowAvatar(page, concept) {
 
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
   const consoleErrors = [];
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  // colorScheme:'dark' fija la preferencia de SO que simula el navegador — sin esto, el
+  // color por default que usa Chromium headless no está garantizado (puede ser claro u
+  // oscuro según el entorno) y, desde que existe el modo claro (punto 5, 2026-10-29 (3)),
+  // eso decide qué paleta aplica cuando no hay data-theme explícito, lo que volvía
+  // impredecibles pruebas de color escritas asumiendo el oscuro original.
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
   const page = await context.newPage();
   page.on('console', (msg) => {
     if (msg.type() === 'error' && !msg.text().includes('404')) consoleErrors.push(msg.text());
@@ -940,7 +964,7 @@ function sharedRowAvatar(page, concept) {
   // prueba necesita emular de verdad una pantalla táctil (hasTouch+isMobile) — si no,
   // Chromium reporta pointer:fine por defecto (como una laptop) y la comparación ya
   // no estaría probando un celular real.
-  const phoneContext = await browser.newContext({ viewport: { width: 932, height: 430 }, hasTouch: true, isMobile: true });
+  const phoneContext = await browser.newContext({ viewport: { width: 932, height: 430 }, hasTouch: true, isMobile: true, colorScheme: 'dark' });
   const phonePage = await phoneContext.newPage();
   await phonePage.goto(BASE, { waitUntil: 'networkidle' });
   await phonePage.waitForTimeout(700);
@@ -2515,6 +2539,141 @@ function sharedRowAvatar(page, concept) {
     );
 
     await pfPage.close();
+  }
+
+  // ---------- Tema claro/oscuro/sistema y color de acentuación configurable (punto 5,
+  // 2026-10-29 (3)) — cubre: default "Sistema" sin fijar data-theme; Claro/Oscuro fijan
+  // data-theme y persisten en localStorage tras recargar; volver a "Sistema" quita el
+  // atributo; el selector de color libre actualiza --accent y sus derivados (incluida la
+  // fórmula de --accent-ink según luminancia, con un color claro y uno oscuro); "Restablecer"
+  // regresa al naranja por default y borra la preferencia guardada; y que un elemento real
+  // (.fab) consume el --accent-ink calculado, no solo que la variable CSS exista. ----------
+  {
+    const themePage = await context.newPage();
+    const gotoFresh = async () => {
+      await themePage.goto(BASE, { waitUntil: 'networkidle' });
+      await themePage.waitForTimeout(500);
+    };
+    await gotoFresh();
+    await themePage.evaluate(() => localStorage.clear());
+    await themePage.reload({ waitUntil: 'networkidle' });
+    await themePage.waitForTimeout(500);
+
+    await themePage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await themePage.waitForTimeout(300);
+
+    check(
+      'Apariencia: por default (sin elección guardada) no hay data-theme explícito — manda el sistema',
+      (await themePage.evaluate(() => document.documentElement.getAttribute('data-theme'))) === null
+    );
+    check(
+      'Apariencia: por default el color de acentuación es el naranja original (#FF7A4A)',
+      (await themePage.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase())) === '#ff7a4a'
+    );
+    check(
+      'Apariencia: sin un color distinto al default, no se muestra el botón "Restablecer"',
+      !(await themePage.evaluate(() => !!document.querySelector('[data-action="reset-accent"]')))
+    );
+
+    // Elegir "Oscuro" explícito: fija data-theme y lo guarda en localStorage.
+    await themePage.evaluate(() => document.querySelector('[data-action="set-theme"][data-v="dark"]').click());
+    await themePage.waitForTimeout(200);
+    check(
+      'Apariencia: elegir "Oscuro" fija data-theme="dark" en <html> y lo guarda en localStorage',
+      (await themePage.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark' &&
+        (await themePage.evaluate(() => localStorage.getItem('theme:mode'))) === 'dark'
+    );
+    await themePage.reload({ waitUntil: 'networkidle' });
+    await themePage.waitForTimeout(400);
+    check(
+      'Apariencia: "Oscuro" persiste tras recargar la página (aplicado por el script inicial, antes de pintar)',
+      (await themePage.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark'
+    );
+
+    // Elegir "Claro" explícito: cambia el atributo y las variables de color de fondo.
+    await themePage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await themePage.waitForTimeout(300);
+    await themePage.evaluate(() => document.querySelector('[data-action="set-theme"][data-v="light"]').click());
+    await themePage.waitForTimeout(200);
+    const lightVars = await themePage.evaluate(() => ({
+      theme: document.documentElement.getAttribute('data-theme'),
+      bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+    }));
+    check(
+      'Apariencia: elegir "Claro" fija data-theme="light" y --bg pasa al valor claro (#F2F2F6)',
+      lightVars.theme === 'light' && lightVars.bg.toLowerCase() === '#f2f2f6',
+      JSON.stringify(lightVars)
+    );
+
+    // Volver a "Sistema": quita el atributo explícito (deja de forzar, manda la preferencia del SO).
+    await themePage.evaluate(() => document.querySelector('[data-action="set-theme"][data-v="system"]').click());
+    await themePage.waitForTimeout(200);
+    check(
+      'Apariencia: elegir "Sistema" quita el atributo data-theme y borra la preferencia guardada',
+      (await themePage.evaluate(() => document.documentElement.getAttribute('data-theme'))) === null &&
+        (await themePage.evaluate(() => localStorage.getItem('theme:mode'))) === null
+    );
+
+    // Color de acentuación: un color CLARO (luminancia alta) debe producir ink oscuro.
+    const lightAccent = await themePage.evaluate(() => {
+      const el = document.getElementById('accent-picker');
+      el.value = '#FAFAFA';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      const cs = getComputedStyle(document.documentElement);
+      return { accent: cs.getPropertyValue('--accent').trim().toLowerCase(), ink: cs.getPropertyValue('--accent-ink').trim().toLowerCase(), saved: localStorage.getItem('theme:accent') };
+    });
+    check(
+      'Apariencia: elegir un acento CLARO (#FAFAFA) actualiza --accent, calcula --accent-ink OSCURO (#1A0E08) por contraste, y lo guarda en localStorage',
+      lightAccent.accent === '#fafafa' && lightAccent.ink === '#1a0e08' && lightAccent.saved?.toLowerCase() === '#fafafa',
+      JSON.stringify(lightAccent)
+    );
+    const fabColorLight = await themePage.evaluate(() => getComputedStyle(document.querySelector('.fab')).color);
+    check(
+      'Apariencia: con acento claro, el botón "+" (.fab) realmente pinta su ícono con --accent-ink oscuro (rgb(26, 14, 8)), no solo la variable',
+      fabColorLight === 'rgb(26, 14, 8)',
+      fabColorLight
+    );
+
+    // Un color OSCURO (luminancia baja) debe producir ink blanco, y debe persistir tras recargar.
+    const darkAccent = await themePage.evaluate(() => {
+      const el = document.getElementById('accent-picker');
+      el.value = '#101025';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      const cs = getComputedStyle(document.documentElement);
+      return { accent: cs.getPropertyValue('--accent').trim().toLowerCase(), ink: cs.getPropertyValue('--accent-ink').trim().toLowerCase() };
+    });
+    check(
+      'Apariencia: elegir un acento OSCURO (#101025) calcula --accent-ink BLANCO (#FFFFFF) por contraste',
+      darkAccent.accent === '#101025' && darkAccent.ink === '#ffffff',
+      JSON.stringify(darkAccent)
+    );
+    await themePage.reload({ waitUntil: 'networkidle' });
+    await themePage.waitForTimeout(400);
+    check(
+      'Apariencia: el color de acentuación elegido persiste tras recargar (aplicado antes de pintar, sin parpadeo al naranja por default)',
+      (await themePage.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase())) === '#101025'
+    );
+
+    // "Restablecer" regresa al naranja original y borra la preferencia guardada.
+    await themePage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await themePage.waitForTimeout(300);
+    check(
+      'Apariencia: con un acento distinto al default ya guardado, el botón "Restablecer" sí aparece',
+      await themePage.evaluate(() => !!document.querySelector('[data-action="reset-accent"]'))
+    );
+    await themePage.evaluate(() => document.querySelector('[data-action="reset-accent"]').click());
+    await themePage.waitForTimeout(200);
+    const afterReset = await themePage.evaluate(() => ({
+      accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase(),
+      saved: localStorage.getItem('theme:accent'),
+    }));
+    check(
+      'Apariencia: "Restablecer" regresa --accent al naranja original (#FF7A4A) y borra la preferencia de localStorage',
+      afterReset.accent === '#ff7a4a' && afterReset.saved === null,
+      JSON.stringify(afterReset)
+    );
+
+    await themePage.close();
   }
 
   await browser.close();
