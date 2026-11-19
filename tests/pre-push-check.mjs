@@ -825,6 +825,10 @@ function sharedRowAvatar(page, concept) {
     const rect = await page.evaluate((s) => {
       const r = document.querySelector(s);
       if (!r) return null;
+      // La fila puede quedar fuera del viewport visible (p. ej. debajo de los filtros y las
+      // tarjetas de KPI de Movimientos), y un arrastre sintético con coordenadas fuera del
+      // viewport no llega a ningún elemento: nos asegura que esté a la vista antes de medirla.
+      r.scrollIntoView({ block: 'center' });
       const rc = r.getBoundingClientRect();
       return { x: rc.x, y: rc.y, width: rc.width, height: rc.height };
     }, rowSel);
@@ -3272,6 +3276,169 @@ function sharedRowAvatar(page, concept) {
     await insPage.evaluate(() => document.querySelector('#close').click());
 
     await insPage.close();
+  }
+
+  // ---------- Punto 5 (2026-11-19): Movimientos ahora tiene filtros combinables (Tipo,
+  // Cuenta, Categoría, Programado) que se aplican juntos (AND), más las tarjetas de KPI
+  // "Disponible hoy" y "Patrimonio neto" (SIEMPRE generales, sin importar los filtros —
+  // decisión explícita del usuario) e "Ingresos"/"Egresos" (SÍ responden a los filtros
+  // activos). El selector de "Programado" pasa de 2 a 3 opciones (Todos/Realizado/
+  // Programado) conservando data-v="done"/"pending" para no romper pruebas anteriores. ----------
+  {
+    const movPage = await context.newPage();
+    await movPage.goto(BASE, { waitUntil: 'networkidle' });
+    await movPage.waitForTimeout(500);
+
+    const T5 = await movPage.evaluate(() => new Date().toLocaleDateString('en-CA'));
+    const addTx5 = async (kind, status, amount, category, fromId) => {
+      await movPage.evaluate(() => document.querySelector('.fab[data-action="new"]').click());
+      await movPage.waitForTimeout(400);
+      if (kind !== 'expense') await movPage.selectOption('[name=kind]', kind);
+      await movPage.waitForTimeout(200);
+      await movPage.fill('[name=concept]', 'Filtro ' + kind + ' ' + amount);
+      if (category) await movPage.selectOption('[name=category]', category);
+      await movPage.selectOption('[name=from]', fromId);
+      await movPage.selectOption('[name=status]', status);
+      await movPage.fill('[name=date]', T5);
+      await movPage.fill('input[aria-label="Importe"]', String(amount));
+      await movPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await movPage.evaluate(() => document.querySelector('#save').click());
+      await movPage.waitForTimeout(400);
+    };
+    // A: ingreso de $500 a "bank" (sin categoría de gasto). B: gasto de $200 en "Transporte"
+    // desde "cash", realizado. C: gasto de $50 en "Transporte" desde "bank", programado.
+    // Junto con el gasto de ejemplo ("Supermercado · ejemplo", $845, realizado, sin
+    // categoría, desde "bank"), dan 4 movimientos en el mes actual con combinaciones
+    // distintas de tipo/cuenta/categoría/estado para probar que los filtros se combinan.
+    await addTx5('income', 'done', '500', '', 'bank');
+    await addTx5('expense', 'done', '200', 'Transporte', 'cash');
+    await addTx5('expense', 'pending', '50', 'Transporte', 'bank');
+    check(
+      'Punto 5 · Preparación: se pudieron registrar los 3 movimientos de prueba sin quedar la hoja abierta por un error',
+      !(await movPage.evaluate(() => document.body.classList.contains('sheet-open')))
+    );
+
+    await movPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await movPage.waitForTimeout(400);
+
+    const movCount = () => movPage.evaluate(() => document.querySelectorAll('#mov-list .swipe-row').length);
+    const kpiText = (label) =>
+      movPage.evaluate(
+        (l) => [...document.querySelectorAll('#s-movimientos .card.tight')].find((c) => c.querySelector('.label')?.textContent.trim() === l)?.querySelector('.mid')?.textContent,
+        label
+      );
+
+    check(
+      'Movimientos: por default ("Todos" en Tipo/Cuenta/Categoría/Programado) se ven los 4 movimientos del mes (el de ejemplo + los 3 de la prueba)',
+      (await movCount()) === 4,
+      String(await movCount())
+    );
+    check('Movimientos: el selector "Programado" por default queda en "Todos" (no en "Realizados" como antes)', await movPage.evaluate(() => document.querySelector('[data-action="seg"][data-v="all"]')?.getAttribute('aria-pressed') === 'true'));
+
+    const disponibleAntes = await kpiText('Disponible hoy');
+    const patrimonioAntes = await kpiText('Patrimonio neto');
+    check('Movimientos: la tarjeta "Disponible hoy" muestra un importe (no vacío)', !!disponibleAntes && disponibleAntes.includes('$'), disponibleAntes);
+    check('Movimientos: la tarjeta "Patrimonio neto" muestra un importe (no vacío)', !!patrimonioAntes && patrimonioAntes.includes('$'), patrimonioAntes);
+
+    const ingresosDefault = await kpiText('Ingresos (filtro)');
+    const egresosDefault = await kpiText('Egresos (filtro)');
+    check('Movimientos: "Ingresos (filtro)" por default suma el ingreso de $500 de la prueba', (ingresosDefault || '').replace(/[.,]/g, '').includes('500'), ingresosDefault);
+    check(
+      'Movimientos: "Egresos (filtro)" por default suma los 3 gastos del mes ($845 + $200 + $50 = $1,095.00)',
+      (egresosDefault || '').replace(/[.,]/g, '').includes('109500') || (egresosDefault || '').replace(/[.,]/g, '').includes('1095'),
+      egresosDefault
+    );
+
+    // Filtro Tipo = Gasto: ya no debe verse el ingreso; "Ingresos (filtro)" cae a 0 y
+    // "Egresos (filtro)" no cambia (no había gastos excluidos).
+    await movPage.click('[data-action="ftipo"][data-id="expense"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: filtro Tipo = Gasto deja solo los 3 gastos (ejemplo + B + C)', (await movCount()) === 3, String(await movCount()));
+    const egresosTrasGasto = await kpiText('Egresos (filtro)');
+    check('Movimientos: con Tipo = Gasto, "Ingresos (filtro)" cae a $0', /\$\s*0(\.00)?\b/.test((await kpiText('Ingresos (filtro)')) || ''), await kpiText('Ingresos (filtro)'));
+    check('Movimientos: con Tipo = Gasto, "Egresos (filtro)" no cambia (sigue siendo solo gastos)', egresosTrasGasto === egresosDefault, egresosTrasGasto + ' vs ' + egresosDefault);
+
+    // Combinar + Categoría = Transporte: deja solo B y C (el gasto de ejemplo no tiene
+    // categoría asignada).
+    await movPage.click('[data-action="fcat"][data-id="Transporte"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: Tipo = Gasto + Categoría = Transporte deja solo B y C (2 movimientos)', (await movCount()) === 2, String(await movCount()));
+    check(
+      'Movimientos: con Tipo = Gasto + Categoría = Transporte, "Egresos (filtro)" ahora es $250.00 (200+50)',
+      ((await kpiText('Egresos (filtro)')) || '').replace(/[.,]/g, '').includes('250')
+    );
+
+    // Combinar + Cuenta = Efectivo (cash): deja solo B (C es desde "bank").
+    await movPage.click('[data-action="acct"][data-id="cash"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: + Cuenta = Efectivo deja solo B (1 movimiento, ya que C es desde "bank")', (await movCount()) === 1, String(await movCount()));
+    check(
+      'Movimientos: con los 3 filtros + Cuenta = Efectivo, "Egresos (filtro)" es $200.00 (solo B)',
+      ((await kpiText('Egresos (filtro)')) || '').replace(/[.,]/g, '').includes('200')
+    );
+
+    // + Programado = Realizado: B es "done", así que no cambia nada.
+    await movPage.click('[data-action="seg"][data-v="done"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: + Programado = Realizado no quita a B (sigue habiendo 1 movimiento, B es "done")', (await movCount()) === 1, String(await movCount()));
+
+    // + Programado = Programado (en vez de Realizado): ahora no queda nada (B es "done", no
+    // "pending"), y se muestra el mensaje de "ningún movimiento coincide".
+    await movPage.click('[data-action="seg"][data-v="pending"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: cambiar a Programado = Programado deja 0 movimientos (B es "done", no "pending")', (await movCount()) === 0, String(await movCount()));
+    check(
+      'Movimientos: con 0 resultados se muestra el mensaje de que ningún movimiento coincide con los filtros (no el de "sin movimientos este mes")',
+      /coincide con los filtros/.test((await movPage.evaluate(() => document.querySelector('#mov-list .empty')?.textContent)) || '')
+    );
+    const disponibleFiltrado = await kpiText('Disponible hoy');
+    const patrimonioFiltrado = await kpiText('Patrimonio neto');
+    check(
+      'Movimientos: con todos esos filtros activos y 0 resultados en la lista, "Disponible hoy" NO cambió (siempre general, sin importar los filtros)',
+      disponibleFiltrado === disponibleAntes,
+      disponibleFiltrado + ' vs ' + disponibleAntes
+    );
+    check(
+      'Movimientos: con todos esos filtros activos y 0 resultados en la lista, "Patrimonio neto" NO cambió (siempre general, sin importar los filtros)',
+      patrimonioFiltrado === patrimonioAntes,
+      patrimonioFiltrado + ' vs ' + patrimonioAntes
+    );
+
+    // Quita los 4 filtros (Todos/Todas/Todas/Todos) y confirma que la lista vuelve a los 4
+    // movimientos originales — ningún filtro quedó "pegado".
+    await movPage.click('[data-action="ftipo"][data-id="all"]');
+    await movPage.click('[data-action="fcat"][data-id="all"]');
+    await movPage.click('[data-action="acct"][data-id="all"]');
+    await movPage.click('[data-action="seg"][data-v="all"]');
+    await movPage.waitForTimeout(300);
+    check('Movimientos: al quitar los 4 filtros (volver a "Todos"/"Todas") se ven de nuevo los 4 movimientos', (await movCount()) === 4, String(await movCount()));
+
+    // El input nativo de mes (atajo "Mes y año") salta directo a un mes sin movimientos.
+    const otherMonth = await movPage.evaluate((t) => {
+      const d = new Date(t + 'T12:00:00Z');
+      d.setUTCMonth(d.getUTCMonth() - 6);
+      return d.toISOString().slice(0, 7);
+    }, T5);
+    const kickerText = () => movPage.evaluate(() => document.querySelector('#s-movimientos .kicker')?.textContent || '');
+    const kickerAntes = await kickerText();
+    const setMonthInput = (value) =>
+      movPage.evaluate((v) => {
+        const el = document.querySelector('#mov-month');
+        el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+    await setMonthInput(otherMonth);
+    await movPage.waitForTimeout(300);
+    check(
+      'Movimientos: el input nativo "Mes y año" salta directo a otro mes (6 meses atrás): ese mes no tiene movimientos y el encabezado cambió',
+      (await movCount()) === 0 && (await kickerText()) !== kickerAntes,
+      await kickerText()
+    );
+    await setMonthInput(T5.slice(0, 7));
+    await movPage.waitForTimeout(300);
+    check('Movimientos: volver al mes original en el input de mes vuelve a mostrar los 4 movimientos', (await movCount()) === 4, String(await movCount()));
+
+    await movPage.close();
   }
 
   await browser.close();

@@ -42,7 +42,7 @@ const account=id=>state.accounts.find(a=>a.id===id)||sharedJoinedAccounts().find
 const active=()=>[...state.accounts,...sharedJoinedAccounts()].filter(a=>!a.archived);
 const txCur=t=>account(t.from||t.to)?.currency||ui.currency;
 
-const ui={tab:'insights',currency:'MXN',month:today().slice(0,7),calMonth:today().slice(0,7),selDay:today(),seg:'done',acct:'all',q:'',push:null,scroll:{},compact:false,strategySeg:'recomendaciones',priority:'snowball'};
+const ui={tab:'insights',currency:'MXN',month:today().slice(0,7),calMonth:today().slice(0,7),selDay:today(),seg:'all',acct:'all',fKind:'all',fCat:'all',q:'',push:null,scroll:{},compact:false,strategySeg:'recomendaciones',priority:'snowball'};
 const currencies=()=>{const s=[...new Set(active().map(a=>a.currency))];return s.length?s:['MXN'];};
 function ensureCurrency(){if(!currencies().includes(ui.currency))ui.currency=currencies()[0];}
 
@@ -229,24 +229,69 @@ function next30Modal(){
  modal('Ver próximos 30 días',next.length?`<div class="list">${next.map(t=>`<div class="row"><div class="grow"><strong>${esc(t.concept)}</strong><small>${dayLabel(t.date)} · ${txSub(t)}</small></div>${txAmount(t)}</div>`).join('')}</div>`:'<p class="empty">Nada programado en los próximos 30 días.</p>',async()=>{});
 }
 
+// Etiquetas cortas de "Tipo" para los chips de filtro (las de `kinds`, reusadas en el
+// formulario de movimiento, son más largas de lo que conviene para un chip).
+const kindFilterLabels={expense:'Gasto',income:'Ingreso',transfer:'Transferencia',payment:'Pago',msi:'MSI'};
+// Todos los movimientos del mes en curso (ui.month) que cumplen los 5 filtros combinables
+// (Tipo, Cuenta, Categoría, Programado) más la búsqueda de texto — sin agrupar por fecha
+// todavía. Lo usan tanto movList() (para pintar la lista) como las tarjetas de Ingresos /
+// Egresos filtrados (ver vMovimientos): un solo lugar define qué cuenta como "filtrado".
+function movRows(){
+  const m=ui.month,q=String(ui.q||'').trim().toLowerCase();
+  let rows=state.transactions.map((t,index)=>({...t,index})).filter(t=>t.date.startsWith(m));
+  if(ui.seg!=='all')rows=rows.filter(t=>t.status===ui.seg);
+  if(ui.acct!=='all')rows=rows.filter(t=>t.from===ui.acct||t.to===ui.acct);
+  if(ui.fKind!=='all')rows=rows.filter(t=>t.kind===ui.fKind);
+  if(ui.fCat!=='all')rows=rows.filter(t=>canonicalCategory(t.category)===ui.fCat);
+  if(q)rows=rows.filter(t=>[t.concept,t.category,t.business,t.notes,name(t.from),name(t.to)].filter(Boolean).join(' ').toLowerCase().includes(q));
+  return rows;
+}
+// Ingresos y egresos de los movimientos ya filtrados (incluye programados si el filtro
+// "Programado" está en "Todos" o en "Programado"; no se limita a lo realizado como
+// monthTotalsCur, porque aquí reflejan exactamente los filtros activos). Si hay una cuenta
+// específica elegida, se usa SU moneda (igual que ya hacía el total por día de la lista);
+// si no, la moneda general de la pantalla.
+function movFilteredTotals(){
+  const cur=ui.acct!=='all'?(account(ui.acct)?.currency||ui.currency):ui.currency,rows=movRows();
+  const inc=rows.filter(t=>t.kind==='income'&&account(t.to)?.currency===cur).reduce((s,t)=>s+(t.received??t.amount),0);
+  const exp=rows.filter(t=>['expense','msi'].includes(t.kind)&&account(t.from)?.currency===cur).reduce((s,t)=>s+t.amount,0);
+  return {cur,inc,exp};
+}
 function vMovimientos(){
-  ensureCurrency();const m=ui.month;const segIdx=ui.seg==='done'?0:1;
-  const rows=state.transactions.filter(t=>t.date.startsWith(m));const nd=rows.filter(t=>t.status==='done').length,np=rows.filter(t=>t.status==='pending').length;
+  ensureCurrency();const m=ui.month,cur=ui.currency;const segIdx=ui.seg==='all'?0:ui.seg==='done'?1:2;
+  const monthRows=state.transactions.filter(t=>t.date.startsWith(m));const nd=monthRows.filter(t=>t.status==='done').length,np=monthRows.filter(t=>t.status==='pending').length;
+  // Disponible hoy y Patrimonio neto son SIEMPRE generales (de todas tus cuentas, sin
+  // importar los filtros de esta pantalla); Ingresos y Egresos sí responden a los filtros.
+  const available=sumBal(liquidAccounts(cur),today(),false),net=health(cur).net,{cur:fcur,inc,exp}=movFilteredTotals();
   return `
   <div class="head"><div><div class="kicker">${monthYear(m)}</div><h1>Movimientos</h1></div>
-  <div style="display:flex;gap:8px"><button class="icon-btn" data-action="month" data-d="-1" aria-label="Mes anterior">‹</button><button class="icon-btn" data-action="month" data-d="1" aria-label="Mes siguiente">›</button></div></div>
-  <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><span class="thumb" style="width:calc(50% - 3px);transform:translateX(${segIdx*100}%)"></span><button data-action="seg" data-v="done" aria-pressed="${ui.seg==='done'}">Realizados · ${nd}</button><button data-action="seg" data-v="pending" aria-pressed="${ui.seg==='pending'}">Programados · ${np}</button></div>
-  <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9BA6" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Buscar movimientos</span><input id="q" type="search" placeholder="Buscar concepto, categoría o negocio" value="${esc(ui.q)}"></label>
-  <div class="chips">${[['all','Todas']].concat(visibleActive().map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div>
+  <div style="display:flex;gap:8px">${currencies().length>1?`<button class="pill" data-action="currency" aria-label="Cambiar moneda, actual ${cur}">${cur}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>`:''}</div></div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="row-between" style="padding:0 4px"><h3 style="color:var(--muted);font-size:14px">Mes y año</h3><div style="display:flex;gap:8px;align-items:center"><button class="icon-btn" data-action="month" data-d="-1" aria-label="Mes anterior">‹</button><input id="mov-month" type="month" value="${esc(m)}" aria-label="Elegir mes y año" style="background:var(--surface2);border:0;border-radius:10px;color:var(--text);padding:8px 10px;font-size:14px"><button class="icon-btn" data-action="month" data-d="1" aria-label="Mes siguiente">›</button></div></div>
+    <div><h3 style="padding:0 4px;color:var(--muted);font-size:14px;margin-bottom:6px">Tipo</h3><div class="chips">${Object.entries({all:'Todos',...kindFilterLabels}).map(([k,l])=>`<button class="chip" data-action="ftipo" data-id="${esc(k)}" aria-pressed="${ui.fKind===k}">${esc(l)}</button>`).join('')}</div></div>
+    <div><h3 style="padding:0 4px;color:var(--muted);font-size:14px;margin-bottom:6px">Cuenta</h3><div class="chips">${[['all','Todas']].concat(visibleActive().map(a=>[a.id,a.name])).map(([id,n])=>`<button class="chip" data-action="acct" data-id="${esc(id)}" aria-pressed="${ui.acct===id}">${esc(n)}</button>`).join('')}</div></div>
+    <div><h3 style="padding:0 4px;color:var(--muted);font-size:14px;margin-bottom:6px">Categoría</h3><div class="chips">${[['all','Todas']].concat(CATEGORIES.map(c=>[c,c])).map(([k,l])=>`<button class="chip" data-action="fcat" data-id="${esc(k)}" aria-pressed="${ui.fCat===k}">${esc(l)}</button>`).join('')}</div></div>
+    <div><h3 style="padding:0 4px;color:var(--muted);font-size:14px;margin-bottom:6px">Programado</h3><div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))"><span class="thumb" style="width:calc(33.333% - 2px);transform:translateX(${segIdx*100}%)"></span><button data-action="seg" data-v="all" aria-pressed="${ui.seg==='all'}" style="font-size:13px">Todos · ${nd+np}</button><button data-action="seg" data-v="done" aria-pressed="${ui.seg==='done'}" style="font-size:13px">Realizados · ${nd}</button><button data-action="seg" data-v="pending" aria-pressed="${ui.seg==='pending'}" style="font-size:13px">Programados · ${np}</button></div></div>
+    <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9BA6" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Buscar movimientos</span><input id="q" type="search" placeholder="Buscar concepto, categoría o negocio" value="${esc(ui.q)}"></label>
+  </div>
+  <div class="grid2">
+    <div class="card tight"><span class="label">Disponible hoy</span><span class="mid num">${fmt0(available,cur)}</span></div>
+    <div class="card tight"><span class="label">Patrimonio neto</span><span class="mid num">${fmt0(net,cur)}</span></div>
+  </div>
+  <div class="grid2">
+    <div class="card tight"><span class="label">Ingresos (filtro)</span><span class="mid num pos">${signed0(inc,fcur)}</span></div>
+    <div class="card tight"><span class="label">Egresos (filtro)</span><span class="mid num neg">${exp?'−'+fmt0(exp,fcur):fmt0(0,fcur)}</span></div>
+  </div>
   <div id="mov-list" style="display:flex;flex-direction:column;gap:14px">${movList()}</div>`;
 }
 function movList(){
-  const m=ui.month,q=String(ui.q||'').trim().toLowerCase();
-  let rows=state.transactions.map((t,index)=>({...t,index})).filter(t=>t.date.startsWith(m)&&t.status===ui.seg);
-  if(ui.acct!=='all')rows=rows.filter(t=>t.from===ui.acct||t.to===ui.acct);
-  if(q)rows=rows.filter(t=>[t.concept,t.category,t.business,t.notes,name(t.from),name(t.to)].filter(Boolean).join(' ').toLowerCase().includes(q));
-  rows.sort((a,b)=>ui.seg==='done'?chronological(b,a):chronological(a,b));
-  if(!rows.length)return `<div class="list"><p class="empty">${q?'Ningún movimiento coincide con tu búsqueda.':ui.seg==='done'?'Sin movimientos realizados en este mes.':'Sin movimientos programados en este mes.'}</p></div>`;
+  const q=String(ui.q||'').trim().toLowerCase();
+  const rows=movRows();
+  rows.sort(ui.seg==='done'?(a,b)=>chronological(b,a):chronological);
+  if(!rows.length){
+    const filtered=ui.seg!=='all'||ui.acct!=='all'||ui.fKind!=='all'||ui.fCat!=='all'||q;
+    return `<div class="list"><p class="empty">${filtered?'Ningún movimiento coincide con los filtros seleccionados.':'Sin movimientos este mes.'}</p></div>`;
+  }
   const groups=new Map();for(const t of rows){if(!groups.has(t.date))groups.set(t.date,[]);groups.get(t.date).push(t);}
   const cur=ui.acct!=='all'?account(ui.acct)?.currency:null;
   return [...groups].map(([d,list])=>{const c=cur||ui.currency;const n=list.reduce((s,t)=>{if(txCur(t)!==c)return s;if(ui.acct!=='all')return s+(t.to===ui.acct?(t.received??t.amount):0)-(t.from===ui.acct?t.amount:0);return s+(t.kind==='income'?(t.received??t.amount):['expense','msi'].includes(t.kind)?-t.amount:0);},0);const tot=n?signed(n,c):'';
@@ -848,8 +893,10 @@ document.addEventListener('click',e=>{
     case 'next30-modal':next30Modal();break;
     case 'month':ui.month=monthDate(ui.month+'-01',Number(b.dataset.d),1).slice(0,7);render('movimientos');break;
     case 'cal-month':ui.calMonth=monthDate(ui.calMonth+'-01',Number(b.dataset.d),1).slice(0,7);render('calendario');break;
-    case 'seg':ui.seg=b.dataset.v;{const th=document.querySelector('#s-movimientos .seg .thumb');if(th)th.style.transform=`translateX(${ui.seg==='done'?0:100}%)`;document.querySelectorAll('#s-movimientos .seg button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===ui.seg));const l=$('#mov-list');if(l)l.innerHTML=movList();}break;
-    case 'acct':ui.acct=id;document.querySelectorAll('#s-movimientos .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.id===id));{const l=$('#mov-list');if(l)l.innerHTML=movList();}break;
+    case 'seg':ui.seg=b.dataset.v;render('movimientos');break;
+    case 'acct':ui.acct=id;render('movimientos');break;
+    case 'ftipo':ui.fKind=id;render('movimientos');break;
+    case 'fcat':ui.fCat=id;render('movimientos');break;
     case 'day':ui.selDay=b.dataset.d;{const sc=document.querySelector('[data-key="calendario"]'),y=sc?sc.scrollTop:0;render('calendario');if(sc)sc.scrollTop=y;}break;
     case 'edit':id&&id.startsWith('stx:')?editSharedTxForm(id):transactionForm(state.transactions.find(t=>t.id===id));break;
     case 'confirm':transactionForm({...state.transactions.find(t=>t.id===id),status:'done'},true);break;
@@ -881,7 +928,7 @@ document.addEventListener('click',e=>{
     case 'close-sheet':case 'close':closeModalSheet();break;
   }}catch(err){const el=$('#error');if(el&&document.body.classList.contains('sheet-open')){el.textContent=err.message;}else notify(err.message);}
 });
-document.addEventListener('input',e=>{if(e.target.id==='q'){ui.q=e.target.value;const l=$('#mov-list');if(l)l.innerHTML=movList();}else if(e.target.id==='accent-picker'){setAccent(e.target.value);}});
+document.addEventListener('input',e=>{if(e.target.id==='q'){ui.q=e.target.value;const l=$('#mov-list');if(l)l.innerHTML=movList();}else if(e.target.id==='accent-picker'){setAccent(e.target.value);}else if(e.target.id==='mov-month'&&/^\d{4}-\d{2}$/.test(e.target.value)){ui.month=e.target.value;render('movimientos');}});
 $('#payroll-file').addEventListener('change',async e=>{try{const list=JSON.parse(await e.target.files[0].text());if(!Array.isArray(list)||list.some(t=>!['earnings','deductions','information'].includes(t.section)||typeof t.company!=='string'||typeof t.code!=='string'||typeof t.concept!=='string'||!Number.isSafeInteger(t.amount)||t.amount<0))throw Error('Catálogo inválido');const next=structuredClone(state);next.payrollTemplates??=[];for(const t of list){const i=next.payrollTemplates.findIndex(x=>x.company===t.company&&x.code===t.code&&x.section===t.section);if(i<0)next.payrollTemplates.push(t);else next.payrollTemplates[i]=t;}await persist(next);notify('Sugerencias de nómina guardadas en tu espacio privado.');}catch(e){notify(e.message);}finally{e.target.value='';}});
 $('#avatar-file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const url=await uploadAvatar(client,user.id,file);myProfile={...myProfile,avatar_url:url};render('ajustes');if(document.body.classList.contains('sheet-open'))profileForm();notify('Foto de perfil actualizada.');}catch(err){notify(err.message);}finally{e.target.value='';}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.body.classList.contains('sheet-open'))closeModalSheet();else if(ui.push)pop();}});
