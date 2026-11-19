@@ -182,7 +182,7 @@ function vInsights(){
   const overdue=state.transactions.filter(t=>t.status==='pending'&&t.date<T).length;
   const tiles=[defs[0],defs[1],defs[2]];
   const proximosHtml=`<div style="display:flex;flex-direction:column;gap:8px"><div class="row-between" style="padding:0 4px"><h2>Próximos 30 días</h2><span class="small">${next.length} programados</span></div>
-    ${next.length?`<div class="list" id="proximos-list">${next.slice(0,5).map(t=>swipeRow(`<div class="tx" style="gap:12px"><span style="width:44px;display:flex;flex-direction:column;align-items:center;flex-shrink:0"><span style="font-size:12px;font-weight:700;color:#FFB18A">${new Date(t.date+'T12:00:00').toLocaleDateString('es-MX',{month:'short'}).replace('.','').toUpperCase()}</span><span style="font-size:20px;font-weight:700;line-height:1.1">${Number(t.date.slice(8))}</span></span><button data-action="edit" data-id="${esc(t.id)}" class="mid-col" style="display:flex;flex-direction:column;flex:1;min-width:0;text-align:left;min-height:44px;justify-content:center"><span class="t1">${esc(t.concept)}</span><span class="t2">${txSub(t)}</span></button>${confirmBtn(t,'')}</div>`,t,esc)).join('')}</div>${next.length>5?`<button class="link" data-action="pending-view" style="align-self:center">Ver los ${next.length} programados</button>`:''}`:'<div class="list"><p class="empty">Nada programado en los próximos 30 días.</p></div>'}
+    ${next.length?`<div class="list" id="proximos-list">${next.slice(0,5).map(t=>swipeRow(`<div class="tx" style="gap:12px"><span style="width:44px;display:flex;flex-direction:column;align-items:center;flex-shrink:0"><span style="font-size:12px;font-weight:700;color:#FFB18A">${new Date(t.date+'T12:00:00').toLocaleDateString('es-MX',{month:'short'}).replace('.','').toUpperCase()}</span><span style="font-size:20px;font-weight:700;line-height:1.1">${Number(t.date.slice(8))}</span></span><button data-action="edit" data-id="${esc(t.id)}" class="mid-col" style="display:flex;flex-direction:column;flex:1;min-width:0;text-align:left;min-height:44px;justify-content:center"><span class="t1">${esc(t.concept)}</span><span class="t2">${txSub(t)}</span></button>${txAmount(t)}${confirmBtn(t,'')}</div>`,t,esc)).join('')}</div><button class="link" data-action="next30-modal" style="align-self:center">Ver todo</button>`:'<div class="list"><p class="empty">Nada programado en los próximos 30 días.</p></div>'}
   </div>`;
   const hoyHtml=todayTx.length?`<div style="display:flex;flex-direction:column;gap:8px"><h2 style="padding:0 4px">Hoy</h2><div class="list">${todayTx.map(txRow).join('')}</div></div>`:'';
   return `
@@ -204,7 +204,7 @@ function vInsights(){
     <span style="display:flex;align-items:center;gap:18px">${ring(h.score,112,12)}<span style="display:flex;flex-direction:column;gap:6px"><span style="font-size:20px;font-weight:700;color:${scoreColor(h.score)}">${scoreLabel(h.score)}</span><span style="font-size:15px;line-height:1.4;color:var(--soft)">${diff===null?'':diff>0?`Subiste ${diff} puntos ${since}. `:diff<0?`Bajaste ${-diff} puntos ${since}. `:`Sin cambios ${since}. `}${weakest?`Lo que más te resta: ${weakest.name.toLowerCase()}.`:''}</span></span></span>
     <span class="grid2" style="width:100%;gap:10px">${tiles.map(d=>`<span style="background:var(--surface2);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:4px"><span class="small">${d.name}</span><span style="font-size:22px;font-weight:700" class="num">${d.value}</span><span class="small" style="font-weight:600;color:${d.s?(d.s[1]==='st-ok'?'var(--pos)':d.s[1]==='st-warn'?'var(--warn)':'var(--neg)'):'var(--muted)'}">${d.s?d.s[0]:'Sin datos'}</span></span>`).join('')}<span style="background:var(--surface2);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:4px"><span class="small">Patrimonio neto</span><span style="font-size:22px;font-weight:700" class="num">${fmt0(h.net,cur)}</span><span class="small" style="font-weight:600;color:${h.net-prev.net>=0?'var(--pos)':'var(--neg)'}">${signed0(h.net-prev.net,cur)} ${since}</span></span></span>
   </button>
-  <div class="card"><div class="row-between"><h2>Gastos por categoría</h2><button class="link" data-action="tab" data-tab="movimientos">Ver todo</button></div>
+  <div class="card"><div class="row-between"><h2>Gastos por categoría</h2><button class="link" data-action="categories-modal">Ver todo</button></div>
     ${totalCat?`<div class="segbar">${catRows.map((c,i)=>`<div class="gw" style="--w:${(c[1]/totalCat*100).toFixed(1)}%;background:${colors[i]}"></div>`).join('')}</div>
     <div style="display:flex;flex-direction:column;gap:12px">${catRows.map((c,i)=>`<div style="display:flex;align-items:center;gap:12px"><span class="dot" style="background:${colors[i]}"></span><span style="font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c[0])}</span><span class="small">${Math.round(c[1]/totalCat*100)}%</span><span class="num" style="font-size:16px;font-weight:600;min-width:80px;text-align:right">${fmt0(c[1],cur)}</span></div>`).join('')}</div>`:'<p class="empty">Aún no hay gastos este mes.</p>'}
   </div>
@@ -212,6 +212,21 @@ function vInsights(){
   ${overdue?`<button type="button" class="banner" data-action="overdue" style="border-color:#FFCF6A55;background:#241C10;width:100%;text-align:left;cursor:pointer"><span style="flex:1;font-size:15px;color:#F3E3C0">Tienes <strong>${overdue}</strong> ${overdue===1?'movimiento programado vencido':'movimientos programados vencidos'} sin confirmar.</span><span class="btn sm" aria-hidden="true">Revisar</span></button>`:''}
   ${hoyHtml?`<div class="row2 even">${proximosHtml}${hoyHtml}</div>`:proximosHtml}
   <div style="display:flex;flex-direction:column;gap:10px"><div class="row-between" style="padding:0 4px"><h2>Explorar mis cuentas</h2></div>${accountGroupSections(visibleActive(),a=>walletCard(a),a=>sortAmount(a,cardAmount(a,today(),false)))}</div>`;
+}
+// "Ver todo" de "Gastos por categoría" (Insights): antes mandaba a Movimientos; ahora abre
+// un pop-up con TODAS las categorías del mes (no solo las 3 principales + "Otras" que se
+// ven en la tarjeta compacta), ordenadas de mayor a menor gasto.
+function categoriesModal(){
+ ensureCurrency();const cur=ui.currency,m=today().slice(0,7);
+ const cats=categoriesFor(m,cur),total=cats.reduce((s,c)=>s+c[1],0);
+ modal('Ver gastos por categoría · '+monthYear(m),total?`<div style="display:flex;flex-direction:column;gap:12px">${cats.map(([label,n])=>`<div style="display:flex;align-items:center;gap:12px"><span style="font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span><span class="small">${Math.round(n/total*100)}%</span><span class="num" style="font-size:16px;font-weight:600;min-width:80px;text-align:right">${fmt0(n,cur)}</span></div>`).join('')}</div>`:'<p class="empty">Aún no hay gastos este mes.</p>',async()=>{});
+}
+// "Ver todo" de "Próximos 30 días" (Insights): antes "Ver los N programados" mandaba a
+// Movimientos (y solo aparecía si había más de 5); ahora siempre abre un pop-up con TODOS
+// los programados de los próximos 30 días, cada uno con su monto.
+function next30Modal(){
+ const T=today(),next=state.transactions.filter(t=>t.status==='pending'&&t.date>=T&&t.date<=addDays(T,30)).sort((a,b)=>a.date.localeCompare(b.date));
+ modal('Ver próximos 30 días',next.length?`<div class="list">${next.map(t=>`<div class="row"><div class="grow"><strong>${esc(t.concept)}</strong><small>${dayLabel(t.date)} · ${txSub(t)}</small></div>${txAmount(t)}</div>`).join('')}</div>`:'<p class="empty">Nada programado en los próximos 30 días.</p>',async()=>{});
 }
 
 function vMovimientos(){
@@ -471,7 +486,7 @@ function bindColorField(root){
 const isSharedAccount=a=>!!(a&&sharedOwnedInfo(a.id));
 const opts=(predicate=()=>true,...allowed)=>{const allow=new Set(allowed.filter(Boolean));return Object.fromEntries(state.accounts.filter(a=>!a.archived&&predicate(a)&&(!isSharedAccount(a)||allow.has(a.id))).map(a=>[a.id,a.name+' · '+a.currency+(isSharedAccount(a)?' · compartida':'')]));};
 
-function modal(title,html,save){$('#modal-title').textContent=title;$('#save').textContent=title.startsWith('Eliminar')?'Eliminar':'Guardar';$('#fields').innerHTML=html;enhanceMoneyInputs($('#fields'));$('#error').textContent='';$('#form').onsubmit=async e=>{e.preventDefault();$('#fields').querySelectorAll('.money-entry').forEach(el=>el.dispatchEvent(new Event('blur')));if(!e.target.reportValidity())return;$('#save').disabled=true;try{const after=await save(Object.fromEntries(new FormData(e.target)));closeModalSheet();if(typeof after==='function')after();}catch(e){$('#error').textContent=e.message;}finally{$('#save').disabled=false;}};openModalSheet();}
+function modal(title,html,save){$('#modal-title').textContent=title;$('#save').textContent=title.startsWith('Eliminar')?'Eliminar':title.startsWith('Ver ')?'Cerrar':'Guardar';$('#fields').innerHTML=html;enhanceMoneyInputs($('#fields'));$('#error').textContent='';$('#form').onsubmit=async e=>{e.preventDefault();$('#fields').querySelectorAll('.money-entry').forEach(el=>el.dispatchEvent(new Event('blur')));if(!e.target.reportValidity())return;$('#save').disabled=true;try{const after=await save(Object.fromEntries(new FormData(e.target)));closeModalSheet();if(typeof after==='function')after();}catch(e){$('#error').textContent=e.message;}finally{$('#save').disabled=false;}};openModalSheet();}
 
 const cents=s=>{const n=Number(s);if(!Number.isFinite(n)||n<0)throw Error('Revisa el importe');return Math.round(n*100);};
 
@@ -829,7 +844,8 @@ document.addEventListener('click',e=>{
     case 'new':transactionForm();break;
     case 'currency':{const c=currencies();ui.currency=c[(c.indexOf(ui.currency)+1)%c.length];renderAll();notify('Moneda: '+ui.currency);break;}
     case 'set-cur':ui.currency=b.dataset.v;renderAll();break;
-    case 'pending-view':ui.seg='pending';ui.month=today().slice(0,7);setTab('movimientos');break;
+    case 'categories-modal':categoriesModal();break;
+    case 'next30-modal':next30Modal();break;
     case 'month':ui.month=monthDate(ui.month+'-01',Number(b.dataset.d),1).slice(0,7);render('movimientos');break;
     case 'cal-month':ui.calMonth=monthDate(ui.calMonth+'-01',Number(b.dataset.d),1).slice(0,7);render('calendario');break;
     case 'seg':ui.seg=b.dataset.v;{const th=document.querySelector('#s-movimientos .seg .thumb');if(th)th.style.transform=`translateX(${ui.seg==='done'?0:100}%)`;document.querySelectorAll('#s-movimientos .seg button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===ui.seg));const l=$('#mov-list');if(l)l.innerHTML=movList();}break;

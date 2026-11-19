@@ -3188,6 +3188,92 @@ function sharedRowAvatar(page, concept) {
     await rulePage.close();
   }
 
+  // ---------- Punto 3 y 4 (2026-11-18): en Insights, "Ver todo" de "Gastos por categoría" y
+  // de "Próximos 30 días" abren un pop-up en vez de mandar a Movimientos, y "Próximos 30
+  // días" ahora también muestra el monto de cada movimiento (inline y en el pop-up). ----------
+  {
+    const insPage = await context.newPage();
+    await insPage.goto(BASE, { waitUntil: 'networkidle' });
+    await insPage.waitForTimeout(500);
+
+    const addTx = async (kind, status, date, amount, category) => {
+      await insPage.evaluate(() => document.querySelector('.fab[data-action="new"]').click());
+      await insPage.waitForTimeout(400);
+      if (kind !== 'expense') await insPage.selectOption('[name=kind]', kind);
+      await insPage.waitForTimeout(200);
+      await insPage.fill('[name=concept]', 'Prueba insights ' + date + ' ' + amount);
+      if (category) await insPage.selectOption('[name=category]', category);
+      await insPage.selectOption('[name=from]', 'bank');
+      await insPage.selectOption('[name=status]', status);
+      await insPage.fill('[name=date]', date);
+      await insPage.fill('input[aria-label="Importe"]', String(amount));
+      await insPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
+      await insPage.evaluate(() => document.querySelector('#save').click());
+      await insPage.waitForTimeout(400);
+    };
+
+    const T = await insPage.evaluate(() => new Date().toLocaleDateString('en-CA'));
+    const inDays = (n) => {
+      const d = new Date(T + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    await addTx('expense', 'done', T, '321', 'Alimentación');
+    await addTx('expense', 'pending', inDays(5), '77', 'Transporte');
+    await addTx('expense', 'pending', inDays(10), '15', 'Entretenimiento');
+    check(
+      'Preparación: se pudieron registrar los 3 movimientos de prueba (gasto realizado + 2 programados) sin quedar la hoja abierta por un error',
+      !(await insPage.evaluate(() => document.body.classList.contains('sheet-open')))
+    );
+
+    await insPage.evaluate(() => document.querySelector('.tabbar [data-tab="insights"]').click());
+    await insPage.waitForTimeout(400);
+
+    check(
+      'Insights → "Próximos 30 días": cada movimiento de la lista (inline, sin abrir el pop-up) ya muestra su monto',
+      await insPage.evaluate(() => {
+        const rows = [...document.querySelectorAll('#proximos-list .tx')];
+        const row = rows.find((r) => r.textContent.includes('77.00') || r.textContent.includes('$77'));
+        return !!row && !!row.querySelector('.amt');
+      })
+    );
+
+    await insPage.click('[data-action="categories-modal"]');
+    await insPage.waitForTimeout(300);
+    const categoriesModalText = await insPage.evaluate(() => document.querySelector('#fields')?.textContent || '');
+    check(
+      'Insights → "Gastos por categoría" → "Ver todo": abre un pop-up (una hoja modal) con el detalle de TODAS las categorías, incluida "Alimentación" con su monto',
+      (await insPage.evaluate(() => document.body.classList.contains('sheet-open'))) &&
+        /Alimentación/.test(categoriesModalText) &&
+        categoriesModalText.replace(/[.,]/g, '').includes('321'),
+      categoriesModalText
+    );
+    check(
+      'Ese pop-up de solo lectura muestra "Cerrar" (no "Guardar") como botón principal',
+      (await insPage.evaluate(() => document.querySelector('#save')?.textContent)) === 'Cerrar'
+    );
+    await insPage.evaluate(() => document.querySelector('#close').click());
+    await insPage.waitForTimeout(300);
+    check(
+      'Tras cerrar ese pop-up, seguimos en Insights (nunca navegó a Movimientos)',
+      await insPage.evaluate(() => document.querySelector('[data-screen="insights"]') !== null || !!document.querySelector('#s-insights'))
+    );
+
+    await insPage.click('[data-action="next30-modal"]');
+    await insPage.waitForTimeout(300);
+    const next30ModalText = await insPage.evaluate(() => document.querySelector('#fields')?.textContent || '');
+    check(
+      'Insights → "Próximos 30 días" → "Ver todo": abre un pop-up con los 2 programados de la prueba, cada uno con su monto',
+      /Prueba insights/.test(next30ModalText) &&
+        next30ModalText.replace(/[.,]/g, '').includes('77') &&
+        next30ModalText.replace(/[.,]/g, '').includes('15'),
+      next30ModalText
+    );
+    await insPage.evaluate(() => document.querySelector('#close').click());
+
+    await insPage.close();
+  }
+
   await browser.close();
 
   // ---------- Reporte ----------
