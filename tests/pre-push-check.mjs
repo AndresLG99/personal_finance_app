@@ -642,6 +642,66 @@ function sharedRowAvatar(page, concept) {
     );
   }
 
+  // ---------- Recurrentes indefinidos (punto 2, 2026-11-18): en vez de pedir un número fijo
+  // de pagos, "Indefinido" mantiene siempre generadas las fechas que cubren los próximos 24
+  // meses (INDEFINITE_HORIZON_MONTHS), extendiéndose sola con topUpIndefiniteRules cada vez
+  // que se cargan los datos — sin que el usuario tenga que volver a guardar la regla.
+  // Pruebas directas de las funciones puras de finance.js, sin navegador. ----------
+  {
+    const { saveRule, topUpIndefiniteRules, indefiniteTargetCount, today: todayFn } = await import('../finance.js');
+    let n = 0;
+    const uid = () => 'gen-' + n++;
+    const baseState = { accounts: [{ id: 'bank', name: 'Banco', currency: 'MXN' }], transactions: [], rules: [] };
+    const rule = { id: 'rule1', kind: 'expense', concept: 'Renta', category: 'Vivienda', from: 'bank', amount: 500000, first: todayFn(), every: 1, unit: 'months', indefinite: true };
+
+    const s1 = saveRule(baseState, rule, uid);
+    const r1 = s1.rules[0];
+    const pendingNow = s1.transactions.filter((t) => t.parent === 'rule1');
+    check(
+      'saveRule con indefinite:true no exige un "count" fijo y genera de una vez las fechas que cubren los próximos 24 meses',
+      r1.count === indefiniteTargetCount(r1, todayFn()) && pendingNow.length === r1.count && pendingNow.every((t) => t.status === 'pending'),
+      JSON.stringify({ count: r1.count, pending: pendingNow.length })
+    );
+
+    const sixMonthsOut = (() => {
+      const d = new Date(todayFn() + 'T12:00:00Z');
+      d.setUTCMonth(d.getUTCMonth() + 6);
+      return d.toISOString().slice(0, 10);
+    })();
+    const target6 = indefiniteTargetCount(r1, sixMonthsOut);
+    const s2 = topUpIndefiniteRules(s1, uid, sixMonthsOut);
+    check(
+      'topUpIndefiniteRules: 6 meses después, extiende la regla sola (más fechas pendientes, count más alto), sin tocar las ya generadas',
+      s2 !== s1 &&
+        s2.rules[0].count === target6 &&
+        s2.transactions.filter((t) => t.parent === 'rule1').length === target6 &&
+        s1.transactions.every((t) => t.parent !== 'rule1' || s2.transactions.some((x) => x.id === t.id && x.date === t.date)),
+      JSON.stringify({ before: s1.rules[0].count, after: s2.rules[0].count })
+    );
+    check(
+      'topUpIndefiniteRules: llamarla otra vez con la misma fecha de referencia no genera duplicados (devuelve el mismo estado, sin cambios)',
+      topUpIndefiniteRules(s2, uid, sixMonthsOut) === s2
+    );
+    const dates = s2.transactions.filter((t) => t.parent === 'rule1').map((t) => t.date);
+    check(
+      'topUpIndefiniteRules: ninguna fecha generada se repite',
+      new Set(dates).size === dates.length,
+      JSON.stringify(dates)
+    );
+
+    check(
+      'saveRule sin indefinite sigue exigiendo un número de fechas válido (1-60), igual que antes',
+      (() => {
+        try {
+          saveRule(baseState, { ...rule, id: 'rule2', indefinite: false, count: undefined }, uid);
+          return false;
+        } catch (e) {
+          return /número de fechas/i.test(e.message);
+        }
+      })()
+    );
+  }
+
   // Sin executablePath fijo: la ruta exacta del Chromium preinstalado cambia entre entornos
   // (p. ej. al reiniciarse el sandbox), así que se usa el que Playwright ya trae por default.
   const browser = await chromium.launch();
@@ -3058,6 +3118,74 @@ function sharedRowAvatar(page, concept) {
     );
 
     await csvPage.close();
+  }
+
+  // ---------- Punto 2 (2026-11-18): el formulario de Recurrentes ofrece "Indefinido" como
+  // alternativa al número fijo de fechas — en la UI real. ----------
+  {
+    const rulePage = await context.newPage();
+    await rulePage.goto(BASE, { waitUntil: 'networkidle' });
+    await rulePage.waitForTimeout(500);
+    await rulePage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await rulePage.waitForTimeout(400);
+    await rulePage.evaluate(() => document.querySelector('[data-action="add-rule"]').click());
+    await rulePage.waitForTimeout(400);
+
+    check(
+      'Recurrentes: por default el número de fechas está visible y "Indefinido" aún no',
+      await rulePage.evaluate(() => {
+        const sel = document.querySelector('[name=duration]');
+        return sel.value === 'count' && getComputedStyle(document.querySelector('[name=count]').closest('label')).display !== 'none';
+      })
+    );
+
+    await rulePage.selectOption('[name=duration]', 'indefinite');
+    check(
+      'Recurrentes: al elegir "Indefinido" se oculta el número de fechas y aparece la nota de que se extiende sola',
+      await rulePage.evaluate(() => {
+        const countHidden = document.querySelector('[name=count]').closest('label').hidden;
+        const note = document.querySelector('#indefinite-note');
+        return countHidden && note && !note.hidden && /24 meses/.test(note.textContent);
+      })
+    );
+
+    await rulePage.fill('[name=concept]', 'Renta indefinida (prueba)');
+    await rulePage.fill('input[aria-label="Importe por pago"]', '5000');
+    await rulePage.evaluate(() => document.querySelector('input[aria-label="Importe por pago"]').blur());
+    await rulePage.selectOption('[name=unit]', 'months');
+    await rulePage.evaluate(() => document.querySelector('#save').click());
+    await rulePage.waitForTimeout(500);
+    check(
+      'Recurrentes: guardar una regla indefinida cierra la hoja sin error',
+      !(await rulePage.evaluate(() => document.body.classList.contains('sheet-open')))
+    );
+
+    const ruleRowText = await rulePage.evaluate(() => {
+      const rows = [...document.querySelectorAll('.settings-row')];
+      const row = rows.find((r) => r.textContent.includes('Renta indefinida (prueba)'));
+      return row ? row.querySelector('.small')?.textContent : null;
+    });
+    check(
+      'Recurrentes: en "Costos recurrentes" la regla indefinida se marca como tal ("· Indefinido")',
+      /Indefinido/.test(ruleRowText || ''),
+      ruleRowText
+    );
+
+    // Vuelve a abrir el formulario de esa regla: debe preseleccionar "Indefinido" y seguir
+    // ocultando el número de fechas.
+    await rulePage.evaluate(() => {
+      const rows = [...document.querySelectorAll('.settings-row')];
+      const row = rows.find((r) => r.textContent.includes('Renta indefinida (prueba)'));
+      row.querySelector('[data-action="rule-edit"]').click();
+    });
+    await rulePage.waitForTimeout(400);
+    check(
+      'Recurrentes: al reabrir una regla indefinida ya guardada, el formulario recuerda "Indefinido" y el número de fechas sigue oculto',
+      await rulePage.evaluate(() => document.querySelector('[name=duration]').value === 'indefinite' && document.querySelector('[name=count]').closest('label').hidden)
+    );
+    await rulePage.evaluate(() => document.querySelector('[data-action="close-sheet"],#close')?.click());
+
+    await rulePage.close();
   }
 
   await browser.close();

@@ -70,19 +70,52 @@ export function removeRule(state,id,removePending=true){
  const next=structuredClone(state);next.rules=next.rules.filter(r=>r.id!==id);
  next.transactions=next.transactions.filter(t=>!(removePending&&t.parent===id&&t.status==='pending')).map(t=>{if(t.parent!==id)return t;const copy={...t};delete copy.parent;return copy;});return next;
 }
+// Horizonte, en meses, que cubre una regla "indefinida" (sin número fijo de pagos): en vez
+// de pedir un número de fechas, se generan las que falten para llegar siempre a este punto
+// en el futuro. Ver indefiniteTargetCount y topUpIndefiniteRules: la regla se sigue
+// extendiendo sola cada vez que se abre la app, sin que el usuario tenga que volver a
+// guardarla.
+export const INDEFINITE_HORIZON_MONTHS=24;
+export function indefiniteTargetCount(rule,reference=today()){
+ const horizon=monthDate(reference,INDEFINITE_HORIZON_MONTHS,Number(reference.slice(8)));
+ let i=0;while(recurringDate(rule.first,i,rule.every||1,rule.unit||'months')<horizon)i++;
+ return i+1;
+}
 export function saveRule(state,rule,uid){
- if(!Number.isSafeInteger(rule.amount)||rule.amount<=0||!Number.isInteger(rule.count)||rule.count<1||rule.count>60||!Number.isInteger(rule.every)||rule.every<1||rule.every>365)throw Error('Revisa monto, frecuencia y número de pagos.');
+ if(!Number.isSafeInteger(rule.amount)||rule.amount<=0||!Number.isInteger(rule.every)||rule.every<1||rule.every>365)throw Error('Revisa monto y frecuencia.');
+ if(!rule.indefinite&&(!Number.isInteger(rule.count)||rule.count<1||rule.count>60))throw Error('Revisa el número de fechas.');
  const next=structuredClone(state),old=next.rules.find(r=>r.id===rule.id);
  const linked=next.transactions.filter(t=>t.parent===rule.id);
  const protectedDates=new Set([...linked.filter(t=>t.status==='done'||t.individualOverride).map(t=>t.scheduledDate||t.date),...(old?.excludedDates||[])]);
  const protectedSlots=new Set(old?.protectedSlots||[]);if(old)for(let i=0;i<old.count;i++){if(protectedDates.has(recurringDate(old.first,i,old.every||1,old.unit||'months')))protectedSlots.add(i);}
- const r={...rule,excludedDates:old?.excludedDates||[],protectedSlots:[...protectedSlots]};
+ const count=rule.indefinite?indefiniteTargetCount(rule):rule.count;
+ const r={...rule,count,excludedDates:old?.excludedDates||[],protectedSlots:[...protectedSlots]};
  if(old)next.rules[next.rules.indexOf(old)]=r;else next.rules.push(r);
  next.transactions=next.transactions.filter(t=>t.parent!==r.id||t.status!=='pending'||t.individualOverride);
  for(let i=0;i<r.count;i++){
   const date=recurringDate(r.first,i,r.every,r.unit);if(protectedDates.has(date)||protectedSlots.has(i))continue;
   const previous=linked.find(t=>t.status==='pending'&&!t.individualOverride&&(t.scheduledDate||t.date)===date);
   next.transactions.push({id:previous?.id||uid(),parent:r.id,kind:r.kind==='income'?'income':'expense',concept:r.concept,category:r.category||'',business:r.business||'',from:r.kind==='income'?null:r.from,to:r.kind==='income'?r.to:null,amount:r.amount,date,status:'pending'});
+ }
+ return next;
+}
+// Se llama al cargar los datos (ver load() en app.js): para cada regla indefinida, si ya
+// falta menos de INDEFINITE_HORIZON_MONTHS por cubrir, genera las fechas que faltan (sin
+// tocar las que ya existen) y sube rule.count. Devuelve el mismo `state` si no había nada
+// que extender, para que quien llama solo guarde cuando el resultado es distinto.
+export function topUpIndefiniteRules(state,uid,reference=today()){
+ const pending=state.rules.filter(r=>r.indefinite&&indefiniteTargetCount(r,reference)>r.count);
+ if(!pending.length)return state;
+ const next=structuredClone(state);
+ for(const rule of pending){
+  const r=next.rules.find(x=>x.id===rule.id),target=indefiniteTargetCount(r,reference);
+  const existingDates=new Set(next.transactions.filter(t=>t.parent===r.id).map(t=>t.scheduledDate||t.date));
+  for(let i=r.count;i<target;i++){
+   const date=recurringDate(r.first,i,r.every||1,r.unit||'months');
+   if((r.excludedDates||[]).includes(date)||existingDates.has(date))continue;
+   next.transactions.push({id:uid(),parent:r.id,kind:r.kind==='income'?'income':'expense',concept:r.concept,category:r.category||'',business:r.business||'',from:r.kind==='income'?null:r.from,to:r.kind==='income'?r.to:null,amount:r.amount,date,status:'pending'});
+  }
+  r.count=target;
  }
  return next;
 }
