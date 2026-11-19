@@ -2900,6 +2900,85 @@ function sharedRowAvatar(page, concept) {
     await tourPage.close();
   }
 
+  // ---------- Punto 6 (2026-11-19): el tutorial guiado ahora difumina ("spotlight") todo lo
+  // que no sea el elemento del paso actual ni la propia ventana del tutorial — p. ej. en el
+  // paso del botón "+", solo ese botón (y el diálogo) quedan en foco. Cubre: existen los
+  // elementos de difuminado/aro mientras la guía está abierta; el recorte del difuminado
+  // tiene un "agujero" (no está simplemente apagado); el aro sigue al elemento correcto en
+  // 2 pasos distintos (el título de Insights en el primer paso, el botón "+" en el paso de
+  // "Registra tu día a día" — antes apuntaba al título de la pantalla, no al botón); y
+  // ambos elementos se quitan del DOM al cerrar la guía, incluso al omitirla a medias. ----------
+  {
+    const spotPage = await context.newPage();
+    await spotPage.goto(BASE, { waitUntil: 'networkidle' });
+    await spotPage.waitForTimeout(700);
+    await spotPage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await spotPage.waitForTimeout(300);
+    await spotPage.evaluate(() => document.querySelector('[data-action="tutorial"]').click());
+    await spotPage.waitForTimeout(400);
+
+    const rectOf = (sel) =>
+      spotPage.evaluate((s) => {
+        const el = document.querySelector(s);
+        if (!el) return null;
+        const c = el.getBoundingClientRect();
+        return { left: c.left, top: c.top, right: c.right, bottom: c.bottom };
+      }, sel);
+    const visibleRectOf = (sel) =>
+      spotPage.evaluate((s) => {
+        const visible = [...document.querySelectorAll(s)].find((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        if (!visible) return null;
+        const c = visible.getBoundingClientRect();
+        return { left: c.left, top: c.top, right: c.right, bottom: c.bottom };
+      }, sel);
+    const rectsRoughlyMatch = (a, b, tol = 14) =>
+      !!a && !!b && Math.abs(a.left - b.left) <= tol && Math.abs(a.top - b.top) <= tol && Math.abs(a.right - b.right) <= tol && Math.abs(a.bottom - b.bottom) <= tol;
+    const spotlightClipPath = () => spotPage.evaluate(() => document.querySelector('.welcome-spotlight')?.style.clipPath || '');
+
+    check(
+      'Tutorial · spotlight: al abrir la guía existen el difuminado y el aro del "spotlight"',
+      await spotPage.evaluate(() => !!document.querySelector('.welcome-spotlight') && !!document.querySelector('.welcome-spotlight-ring'))
+    );
+    check('Tutorial · spotlight: el difuminado tiene un recorte con "agujero" (clip-path: polygon(...), no "none")', (await spotlightClipPath()).includes('polygon'));
+    check(
+      'Tutorial · spotlight: en el primer paso, el aro rodea el título de Insights (el objetivo de ese paso)',
+      rectsRoughlyMatch(await rectOf('.welcome-spotlight-ring'), await rectOf('[data-screen="insights"] h1')),
+      JSON.stringify({ ring: await rectOf('.welcome-spotlight-ring'), target: await rectOf('[data-screen="insights"] h1') })
+    );
+
+    // Avanza hasta "Registra tu día a día" (paso 4, índice 3: Bienvenido, Primero tus
+    // cuentas, Comparte una cuenta, Registra tu día a día).
+    for (let i = 0; i < 3; i++) {
+      await spotPage.evaluate(() => document.querySelector('#welcome-next').click());
+      await spotPage.waitForTimeout(300);
+    }
+    // El aro se mueve con una transición CSS de .4s: espera a que termine antes de medirlo,
+    // o se captura a medio camino entre el objetivo anterior y el nuevo.
+    await spotPage.waitForTimeout(500);
+    check(
+      'Tutorial · spotlight: llegamos al paso "Registra tu día a día"',
+      (await spotPage.evaluate(() => document.querySelector('#welcome-title')?.textContent.trim())) === 'Registra tu día a día'
+    );
+    check(
+      'Tutorial · spotlight: en el paso "Registra tu día a día", el aro rodea el botón "+" visible (no el título de la pantalla, como antes)',
+      rectsRoughlyMatch(await rectOf('.welcome-spotlight-ring'), await visibleRectOf('[data-action="new"]')),
+      JSON.stringify({ ring: await rectOf('.welcome-spotlight-ring'), fab: await visibleRectOf('[data-action="new"]') })
+    );
+
+    // Omitir la guía a medias también limpia el spotlight del DOM (no solo terminarla).
+    await spotPage.evaluate(() => document.querySelector('#welcome-skip').click());
+    await spotPage.waitForTimeout(300);
+    check(
+      'Tutorial · spotlight: al omitir la guía a medias, el difuminado y el aro se quitan del DOM',
+      await spotPage.evaluate(() => !document.querySelector('.welcome-spotlight') && !document.querySelector('.welcome-spotlight-ring') && !document.querySelector('#welcome'))
+    );
+
+    await spotPage.close();
+  }
+
   // ---------- Tema claro/oscuro/sistema y color de acentuación configurable (punto 5,
   // 2026-10-29 (3)) — cubre: default "Sistema" sin fijar data-theme; Claro/Oscuro fijan
   // data-theme y persisten en localStorage tras recargar; volver a "Sistema" quita el

@@ -75,6 +75,9 @@ dialog::backdrop{background:#07081099;-webkit-backdrop-filter:blur(14px) saturat
 .welcome [role=alert]{color:var(--neg);font-size:13px;min-height:0}
 .welcome .eyebrow{font-size:11px;letter-spacing:.14em;color:var(--accent-soft);font-weight:700}
 @media(max-width:800px){.welcome[open]{inset:auto 12px calc(98px + env(safe-area-inset-bottom)) 12px;max-height:48dvh;width:auto}}
+/* "Spotlight" del tutorial (punto 6, 2026-11-19): ver trackSpotlight() en onboarding.js. */
+.welcome-spotlight{position:fixed;inset:0;z-index:33;background:#07081099;-webkit-backdrop-filter:blur(10px) saturate(70%);backdrop-filter:blur(10px) saturate(70%);pointer-events:none;transition:clip-path .4s var(--spring)}
+.welcome-spotlight-ring{position:fixed;z-index:34;border-radius:16px;border:2px solid var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 35%,transparent),0 0 22px color-mix(in srgb,var(--accent) 55%,transparent);pointer-events:none;opacity:0;transition:left .4s var(--spring),top .4s var(--spring),width .4s var(--spring),height .4s var(--spring),opacity .25s}
 
 /* ---------- Entrada de importes (money-input.js) ---------- */
 .money-entry{width:100%;font-variant-numeric:tabular-nums}
