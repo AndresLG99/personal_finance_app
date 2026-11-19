@@ -347,6 +347,9 @@
 
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const BASE = process.argv[2] || 'http://127.0.0.1:8901/index.html';
 const AVATAR_FIXTURE = fileURLToPath(new URL('./fixtures/avatar-test.png', import.meta.url));
@@ -512,7 +515,136 @@ function sharedRowAvatar(page, concept) {
     );
   }
 
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  // ---------- account-csv.js (punto 1, 2026-11-18): editor de movimientos de una cuenta por
+  // CSV (reemplaza el antiguo "Descargar plantilla" / "Cargar CSV", que solo agregaba pagos
+  // programados). Pruebas directas de las funciones puras: exportar, comparar (diff) contra
+  // el archivo reimportado y aplicar ese diff — sin navegador. ----------
+  {
+    const { exportAccountCSV, diffAccountCSV, applyAccountCSV, isCsvEditable } = await import('../account-csv.js');
+    const baseState = {
+      accounts: [
+        { id: 'bank', name: 'Banco', currency: 'MXN', archived: false },
+        { id: 'credit', name: 'Tarjeta', currency: 'MXN', archived: false, type: 'credit' },
+        { id: 'shared1', name: 'Compartida', currency: 'MXN', archived: false },
+      ],
+      transactions: [
+        { id: 't1', kind: 'expense', concept: 'Super', date: '2026-01-05', from: 'bank', amount: 10000, status: 'done', category: 'Alimentación' },
+        { id: 't2', kind: 'payment', concept: 'Pago tarjeta', date: '2026-01-20', from: 'bank', to: 'credit', amount: 20000, status: 'pending' },
+        { id: 't3', kind: 'msi', concept: 'Compra MSI', date: '2026-01-02', from: 'credit', amount: 60000, status: 'done' },
+        { id: 't4', kind: 'payment', concept: 'Compra MSI · 1/6', date: '2026-02-22', from: 'bank', to: 'credit', amount: 10000, status: 'pending', parent: 't3' },
+        { id: 't5', kind: 'transfer', concept: 'A compartida', date: '2026-01-10', from: 'bank', to: 'shared1', amount: 5000, status: 'done' },
+      ],
+      rules: [],
+    };
+    const sharedIds = new Set(['shared1']);
+
+    check(
+      'isCsvEditable: una compra MSI, una mensualidad (parent) y un movimiento hacia una cuenta compartida no son editables; un gasto y un pago simples sí',
+      isCsvEditable(baseState.transactions[0], sharedIds) === true &&
+        isCsvEditable(baseState.transactions[1], sharedIds) === true &&
+        isCsvEditable(baseState.transactions[2], sharedIds) === false &&
+        isCsvEditable(baseState.transactions[3], sharedIds) === false &&
+        isCsvEditable(baseState.transactions[4], sharedIds) === false
+    );
+
+    const exported = exportAccountCSV(baseState, 'bank', sharedIds);
+    const expLines = exported.trim().split('\r\n');
+    check(
+      'exportAccountCSV: incluye TODO lo que toca la cuenta (gasto, pago, mensualidad MSI y transferencia a cuenta compartida), pero no la compra MSI que solo toca la tarjeta',
+      expLines.length === 5 && exported.includes('t1,') && exported.includes('t2,') && exported.includes('t4,') && exported.includes('t5,') && !exported.includes('t3,'),
+      exported
+    );
+    check(
+      'exportAccountCSV: marca "editable" en si/no correctamente (t2 pago simple = si; t4 mensualidad MSI y t5 hacia cuenta compartida = no)',
+      /^t2,.*,si$/m.test(exported.replace(/\r$/, '')) && expLines.find((l) => l.startsWith('t4,'))?.endsWith(',no') && expLines.find((l) => l.startsWith('t5,'))?.endsWith(',no'),
+      exported
+    );
+
+    // Volver a cargar el export sin tocar nada no debe generar ningún cambio (ni siquiera en
+    // t1, que no tiene categoría asignada: canonicalCategory('') resuelve a 'Sin Categoria',
+    // así que el lado viejo se normaliza igual al comparar, o se marcaría como "cambiado"
+    // con solo re-subir su propia fila intacta).
+    const noopDiff = diffAccountCSV(exported, baseState, 'bank', sharedIds);
+    check(
+      'diffAccountCSV: recargar el CSV exportado sin editarlo no detecta altas, cambios ni bajas, y omite (sin error) las 2 filas no editables (t4, t5)',
+      noopDiff.errors.length === 0 && noopDiff.toAdd.length === 0 && noopDiff.toEdit.length === 0 && noopDiff.toDelete.length === 0 && noopDiff.skipped.length === 2,
+      JSON.stringify(noopDiff)
+    );
+
+    // Editar el importe de t2, quitar la fila de t1 (baja), agregar una fila nueva sin id
+    // (alta), e intentar editar t4 (una mensualidad MSI) — debe omitirse sin aplicar el
+    // cambio ni romper el resto del archivo. Filas escritas a mano (en vez de parchar el
+    // export con regex) para que la prueba no dependa del formato exacto de exportAccountCSV.
+    const withNewRow = [
+      'id,fecha,tipo,estado,concepto,cuenta_origen,cuenta_destino,monto,monto_recibido,categoria,negocio,notas,editable',
+      't2,2026-01-20,pago,programado,Pago tarjeta,Banco,Tarjeta,250.00,,,,,si',
+      't4,2026-02-22,pago_msi,programado,Mensualidad editada (debe ignorarse),Banco,Tarjeta,999.00,,,,,no',
+      't5,2026-01-10,transferencia,realizado,A compartida,Banco,Compartida,50.00,,,,,no',
+      ',2026-03-01,ingreso,programado,Nuevo ingreso CSV,,Banco,500.00,,Otros Ingresos,,,si',
+    ].join('\r\n');
+    const diff2 = diffAccountCSV(withNewRow, baseState, 'bank', sharedIds);
+    check(
+      'diffAccountCSV: detecta el alta nueva, el cambio en t2 y la baja de t1, sin errores',
+      diff2.errors.length === 0 &&
+        diff2.toAdd.length === 1 &&
+        diff2.toAdd[0].kind === 'income' &&
+        diff2.toAdd[0].to === 'bank' &&
+        diff2.toEdit.length === 1 &&
+        diff2.toEdit[0].id === 't2' &&
+        diff2.toEdit[0].after.amount === 25000 &&
+        diff2.toDelete.length === 1 &&
+        diff2.toDelete[0].id === 't1',
+      JSON.stringify(diff2)
+    );
+    check(
+      'diffAccountCSV: el intento de editar t4 (mensualidad de una compra MSI) se omite en "skipped" y NO se cuela como cambio',
+      diff2.skipped.some((s) => s.id === 't4') && !diff2.toEdit.some((e) => e.id === 't4'),
+      JSON.stringify(diff2.skipped)
+    );
+
+    check(
+      'diffAccountCSV: una fila nueva con tipo "compra_msi" se rechaza (las MSI no se crean por este CSV)',
+      /MSI/.test(
+        diffAccountCSV(
+          exported + '\r\n,2026-03-01,compra_msi,programado,Compra nueva,Banco,,900.00,,,,,si',
+          baseState,
+          'bank',
+          sharedIds
+        ).errors.join(' ')
+      )
+    );
+    check(
+      'diffAccountCSV: un id que no existe se rechaza con un mensaje claro',
+      /no reconocido/i.test(
+        diffAccountCSV(exported + '\r\nid-inexistente,2026-03-01,gasto,programado,X,Banco,,100.00,,,,,si', baseState, 'bank', sharedIds).errors.join(' ')
+      )
+    );
+    check(
+      'diffAccountCSV: un id de un movimiento que no toca esta cuenta (t3, solo toca la tarjeta) se rechaza',
+      /no corresponde a un movimiento de esta cuenta/i.test(
+        diffAccountCSV(exported + '\r\nt3,2026-01-02,gasto,programado,X,Banco,,100.00,,,,,si', baseState, 'bank', sharedIds).errors.join(' ')
+      )
+    );
+
+    let n = 0;
+    const uid = () => 'new-' + n++;
+    const applied = applyAccountCSV(baseState, diff2, uid);
+    check(
+      'applyAccountCSV: aplica alta, cambio y baja; deja intactas las filas no editables (t3, t4, t5)',
+      !applied.transactions.some((t) => t.id === 't1') &&
+        applied.transactions.find((t) => t.id === 't2')?.amount === 25000 &&
+        applied.transactions.some((t) => t.id === 'new-0' && t.kind === 'income' && t.to === 'bank' && t.amount === 50000) &&
+        applied.transactions.some((t) => t.id === 't3') &&
+        applied.transactions.find((t) => t.id === 't4')?.concept === 'Compra MSI · 1/6' &&
+        applied.transactions.some((t) => t.id === 't5') &&
+        applied.transactions.length === baseState.transactions.length, // se quitó t1 y se agregó new-0: el total no cambia
+      JSON.stringify(applied.transactions)
+    );
+  }
+
+  // Sin executablePath fijo: la ruta exacta del Chromium preinstalado cambia entre entornos
+  // (p. ej. al reiniciarse el sandbox), así que se usa el que Playwright ya trae por default.
+  const browser = await chromium.launch();
   const consoleErrors = [];
   // colorScheme:'dark' fija la preferencia de SO que simula el navegador — sin esto, el
   // color por default que usa Chromium headless no está garantizado (puede ser claro u
@@ -1687,6 +1819,15 @@ function sharedRowAvatar(page, concept) {
     await msiPage.fill('input[aria-label="Importe"]', '6000');
     await msiPage.evaluate(() => document.querySelector('input[aria-label="Importe"]').blur());
     await msiPage.evaluate(() => { document.querySelector('[name=count]').value = '6'; });
+    // La primera mensualidad se sugiere automáticamente según el corte/pago de la tarjeta de
+    // ejemplo (día 22) relativo a hoy, y según el día del mes en que corra esta prueba puede
+    // caer fuera de los próximos 30 días (donde se confirma la primera cuota más abajo). Se
+    // fija explícitamente a 5 días a partir de hoy para que siempre quede dentro de esa ventana.
+    await msiPage.evaluate(() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 5);
+      document.querySelector('[name=first]').value = d.toLocaleDateString('en-CA');
+    });
     await msiPage.selectOption('[name=source]', 'bank');
     await tapM('#save');
     await msiPage.waitForTimeout(400);
@@ -2083,7 +2224,12 @@ function sharedRowAvatar(page, concept) {
     fxPage.on('console', (m) => {
       if (m.type() === 'error' && !m.text().includes('404')) fxErrors.push(m.text());
     });
-    const today = new Date().toISOString().slice(0, 10);
+    // today() en finance.js usa la fecha LOCAL del navegador (toLocaleDateString('en-CA')),
+    // no UTC — hay que usar lo mismo aquí para la fecha de la cotización simulada, porque
+    // quote() rechaza una tasa "del futuro" (data.date > date) y, en una zona horaria detrás
+    // de UTC, un today() calculado con toISOString() puede caer un día por delante del
+    // today() real que usa la app durante varias horas cada día (justo tras la medianoche UTC).
+    const today = new Date().toLocaleDateString('en-CA');
     await fxPage.route('**api.frankfurter.dev/v2/rate/CAD/MXN**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ amount: 1, base: 'CAD', date: today, rates: { MXN: 15 }, rate: 15 }) })
     );
@@ -2823,6 +2969,95 @@ function sharedRowAvatar(page, concept) {
     );
 
     await themePage.close();
+  }
+
+  // ---------- Punto 1 (2026-11-18): editor de movimientos de una cuenta por CSV, de punta a
+  // punta en la UI real — reemplaza "Descargar plantilla" / "Cargar CSV". Descarga el CSV de
+  // la cuenta de ejemplo "bank" (que ya trae un gasto "example" y un pago "payment" de la
+  // cuenta de muestra), lo edita (cambia el concepto del gasto, quita el pago y agrega un
+  // gasto nuevo) y lo vuelve a cargar; confirma que la vista previa cuenta bien los cambios y
+  // que, tras guardar, el estado de la app refleja exactamente esos 3 cambios. ----------
+  {
+    const csvPage = await context.newPage();
+    await csvPage.goto(BASE, { waitUntil: 'networkidle' });
+    await csvPage.waitForTimeout(500);
+    await csvPage.evaluate(() => document.querySelector('.tabbar [data-tab="ajustes"]').click());
+    await csvPage.waitForTimeout(400);
+
+    check(
+      'Editor de CSV por cuenta: ya no están los botones antiguos "Descargar plantilla" / "Cargar CSV"',
+      await csvPage.evaluate(() => !document.querySelector('[data-action="csv-template"]') && !document.querySelector('[data-action="csv-import"]'))
+    );
+    check(
+      'Editor de CSV por cuenta: la tarjeta "Editar movimientos por CSV" muestra el selector de cuenta y los botones de descargar/cargar',
+      await csvPage.evaluate(() => !!document.querySelector('#account-csv-select') && !!document.querySelector('[data-action="account-csv-export"]') && !!document.querySelector('[data-action="account-csv-import"]'))
+    );
+
+    await csvPage.selectOption('#account-csv-select', 'bank');
+    const [download] = await Promise.all([csvPage.waitForEvent('download'), csvPage.click('[data-action="account-csv-export"]')]);
+    const csvText = readFileSync(await download.path(), 'utf8');
+    const lines = csvText.trim().split('\r\n');
+    const exampleLine = lines.find((l) => l.startsWith('example,'));
+    const paymentLine = lines.find((l) => l.startsWith('payment,'));
+    check(
+      'Descargar CSV: incluye los 2 movimientos de ejemplo de la cuenta "bank" (gasto "example" y pago "payment"), ambos editables',
+      lines[0] === 'id,fecha,tipo,estado,concepto,cuenta_origen,cuenta_destino,monto,monto_recibido,categoria,negocio,notas,editable' &&
+        !!exampleLine &&
+        exampleLine.endsWith(',si') &&
+        !!paymentLine &&
+        paymentLine.endsWith(',si'),
+      csvText
+    );
+
+    // Edita el concepto de "example", quita la fila de "payment" (baja) y agrega un gasto
+    // nuevo sin id (alta).
+    const today = exampleLine.split(',')[1];
+    const editedExample = exampleLine.split(',');
+    editedExample[4] = 'Supermercado editado por CSV';
+    const editedLines = [lines[0], editedExample.join(','), `,${today},gasto,realizado,Gasto nuevo por CSV,Cuenta principal · ejemplo,,10.00,,,,,si`];
+    const dir = mkdtempSync(join(tmpdir(), 'pfa-csv-'));
+    const editedPath = join(dir, 'movimientos-editado.csv');
+    writeFileSync(editedPath, editedLines.join('\r\n') + '\r\n', 'utf8');
+
+    const [chooser] = await Promise.all([csvPage.waitForEvent('filechooser'), csvPage.click('[data-action="account-csv-import"]')]);
+    await chooser.setFiles(editedPath);
+    await csvPage.waitForTimeout(500);
+    const previewText = await csvPage.evaluate(() => document.querySelector('#fields')?.textContent || '');
+    check(
+      'Cargar CSV corregido: la vista previa cuenta 1 nuevo, 1 cambio y 1 baja (el pago "payment" que ya no está en el archivo), sin errores',
+      /1 nuevos/.test(previewText) && /1 con cambios/.test(previewText) && /1 para eliminar/.test(previewText) && !/Corrige los/.test(previewText),
+      previewText
+    );
+
+    await csvPage.evaluate(() => document.querySelector('#save').click());
+    await csvPage.waitForTimeout(500);
+    check(
+      'Cargar CSV corregido: al guardar, la hoja se cierra sin error (los 3 cambios se aplicaron)',
+      !(await csvPage.evaluate(() => document.body.classList.contains('sheet-open')))
+    );
+
+    await csvPage.evaluate(() => document.querySelector('.tabbar [data-tab="movimientos"]').click());
+    await csvPage.waitForTimeout(400);
+    // "example" (editado) y el gasto nuevo quedaron "realizado" (done); el segmento por
+    // default ya es "done", así que ambos deben verse ahí sin tener que cambiar de segmento.
+    const doneConcepts = await csvPage.evaluate(() => [...document.querySelectorAll('#mov-list .t1')].map((e) => e.textContent.trim()));
+    check(
+      'Tras aplicar el CSV: el gasto editado y el nuevo gasto aparecen en Movimientos (segmento "Realizados")',
+      doneConcepts.includes('Supermercado editado por CSV') && doneConcepts.includes('Gasto nuevo por CSV'),
+      JSON.stringify(doneConcepts)
+    );
+    // El pago "payment" (programado) se eliminó: cambiar al segmento "Programados" no debe
+    // mostrarlo.
+    await csvPage.evaluate(() => document.querySelector('#s-movimientos .seg [data-action="seg"][data-v="pending"]').click());
+    await csvPage.waitForTimeout(300);
+    const pendingConcepts = await csvPage.evaluate(() => [...document.querySelectorAll('#mov-list .t1')].map((e) => e.textContent.trim()));
+    check(
+      'Tras aplicar el CSV: el pago "payment" que ya no estaba en el archivo se eliminó (no aparece en "Programados")',
+      !pendingConcepts.includes('Pago de tarjeta · ejemplo'),
+      JSON.stringify(pendingConcepts)
+    );
+
+    await csvPage.close();
   }
 
   await browser.close();
